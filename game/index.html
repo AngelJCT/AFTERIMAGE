@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#1a1914" />
+  <title>AFTERIMAGE</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div id="bars" aria-hidden="true"></div>
+
+  <div id="fade"></div>
+
+  <div id="subtitle" aria-live="polite"></div>
+
+  <div id="prompt"><span class="key"></span><span class="label"></span></div>
+
+  <div id="found" aria-live="polite"></div>
+
+  <div id="touch-ui">
+    <div id="stick"><div id="stick-knob"></div></div>
+    <button id="act-btn" type="button">reach</button>
+  </div>
+
+  <button id="pause-btn" type="button" aria-label="pause">II</button>
+
+  <div id="menu" hidden>
+    <div class="panel">
+      <div class="title">paused</div>
+      <div id="album" hidden><span>afterimages</span><div class="frames"></div></div>
+      <button type="button" data-act="resume">resume</button>
+      <button type="button" data-act="chapters">chapters</button>
+      <div id="menu-chapters" hidden></div>
+      <button type="button" data-act="photo">photo mode</button>
+      <button type="button" data-act="checkpoint">restart from checkpoint</button>
+      <div class="row"><span>subtitles</span>
+        <button type="button" data-sub="s">small</button><button type="button" data-sub="m">medium</button><button type="button" data-sub="l">large</button>
+      </div>
+      <div class="row"><span>guide</span>
+        <button type="button" data-guide="subtle">subtle</button><button type="button" data-guide="always">always</button><button type="button" data-guide="off">off</button>
+      </div>
+      <div class="row"><span>subtitle backing</span>
+        <button type="button" data-access="backing:off">off</button><button type="button" data-access="backing:on">on</button>
+      </div>
+      <div class="row"><span>camera shake</span>
+        <button type="button" data-access="shake:full">full</button><button type="button" data-access="shake:low">low</button><button type="button" data-access="shake:off">off</button>
+      </div>
+      <div class="row"><span>flashes and trails</span>
+        <button type="button" data-access="effects:full">full</button><button type="button" data-access="effects:reduced">reduced</button>
+      </div>
+      <div class="row"><span>look speed</span>
+        <button type="button" data-access="look:slow">slow</button><button type="button" data-access="look:normal">normal</button><button type="button" data-access="look:fast">fast</button>
+      </div>
+      <div class="row"><span>invert look</span>
+        <button type="button" data-access="invert:off">off</button><button type="button" data-access="invert:on">on</button>
+      </div>
+      <div class="row"><span>held actions</span>
+        <button type="button" data-access="hold:hold">hold</button><button type="button" data-access="hold:toggle">toggle</button>
+      </div>
+      <div class="row"><span>quality</span>
+        <button type="button" data-q="auto">auto</button><button type="button" data-q="high">high</button><button type="button" data-q="low">low</button>
+      </div>
+      <button type="button" data-act="reset" class="quiet">start over</button>
+    </div>
+  </div>
+
+  <div id="card" aria-live="polite"></div>
+
+  <div id="photo" hidden>
+    <div class="head">photo mode <span class="hint">WASD · R F · drag · wheel · H hides · C leaves</span></div>
+    <label>lens <input type="range" name="lens" min="16" max="135" step="1"><output for="lens"></output></label>
+    <label>focus <input type="range" name="focus" min="0.3" max="30" step="0.1"><output for="focus"></output></label>
+    <div class="row"><button type="button" data-photo="focus-her">focus on her</button></div>
+    <label>aperture <input type="range" name="aperture" min="0" max="14" step="0.5"><output for="aperture"></output></label>
+    <label>exposure <input type="range" name="exposure" min="-2" max="2" step="0.1"><output for="exposure"></output></label>
+    <label>roll <input type="range" name="roll" min="-30" max="30" step="1"><output for="roll"></output></label>
+    <label>grain <input type="range" name="grain" min="0" max="0.15" step="0.005"><output for="grain"></output></label>
+    <label>vignette <input type="range" name="vignette" min="0" max="0.9" step="0.01"><output for="vignette"></output></label>
+    <div class="row looks"><button type="button" data-look="film">film</button><button type="button" data-look="warm">warm</button><button type="button" data-look="cold">cold</button><button type="button" data-look="silver">silver</button></div>
+    <div class="row"><button type="button" data-photo="her">her</button><button type="button" data-photo="bars">bars</button><button type="button" data-photo="hide">hide panel</button></div>
+    <div class="row"><button type="button" data-photo="save" class="save">save</button><button type="button" data-photo="exit">leave</button></div>
+  </div>
+
+  <div id="chapter" aria-live="polite"><span class="n"></span><span class="t"></span></div>
+
+  <div id="start">
+    <div class="veil"></div>
+    <div class="title">AFTERIMAGE</div>
+    <div class="loading" id="loading" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="bar"><i></i></div>
+    </div>
+    <div class="buttons" hidden>
+      <button type="button" id="begin-btn">begin</button>
+      <button type="button" id="continue-btn" hidden>continue</button>
+      <button type="button" id="chapters-btn" hidden>chapters</button>
+    </div>
+    <div id="chapters" hidden></div>
+    <div class="sub">headphones recommended</div>
+  </div>
+
+  <div id="fallback" hidden>This experience needs WebGPU or WebGL2.</div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

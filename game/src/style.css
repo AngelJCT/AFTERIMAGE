@@ -1,0 +1,395 @@
+:root {
+  --ivory: #efe8d8;
+  --ink: #15140f;
+  --cyan: #4fd8ff;
+  --font: 'Montserrat', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--ivory);
+  font-family: var(--font);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+}
+
+#view {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+}
+
+#fade {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 1;
+  pointer-events: none;
+  transition: opacity 2.4s ease;
+}
+
+/* Letterbox for cinematic shots; --bars is set per frame from the camera. */
+#bars::before,
+#bars::after {
+  content: '';
+  position: fixed;
+  left: 0;
+  right: 0;
+  height: var(--bars, 0px);
+  background: #000;
+  pointer-events: none;
+}
+#bars::before { top: 0; }
+#bars::after { bottom: 0; }
+
+/* Matches the film: small, centered, white, soft shadow. Sits in the lower bar when shown. */
+#subtitle {
+  position: fixed;
+  left: 50%;
+  bottom: calc(max(9vh - var(--bars, 0px) * 1.25, var(--bars, 0px) * 0.3) + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  width: min(90vw, 900px);
+  text-align: center;
+  font-size: clamp(15px, 2.1vw, 24px);
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  color: #fff;
+  text-shadow: 0 0 12px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 0.9s ease;
+  pointer-events: none;
+}
+#subtitle.show { opacity: 1; }
+
+#prompt {
+  position: fixed;
+  left: 50%;
+  bottom: calc(22vh + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  text-transform: lowercase;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  pointer-events: none;
+}
+#prompt.show { opacity: 0.85; }
+#prompt .key {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(239, 232, 216, 0.6);
+  border-radius: 13px;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+#prompt .key:empty { display: none; }
+/* Seen a few times: only the word remains. */
+#prompt.known .key { display: none; }
+
+/* Afterimages found: six small dots, shown for a moment after each one. */
+#found {
+  position: fixed;
+  left: 50%;
+  top: calc(max(var(--bars, 0px), 0px) + 26px + env(safe-area-inset-top));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 12px;
+  opacity: 0;
+  transition: opacity 1.6s ease;
+  pointer-events: none;
+}
+#found { flex-direction: column; align-items: center; }
+#found .dots { display: flex; gap: 12px; }
+#found .caption {
+  font-size: 12px; letter-spacing: 0.28em; color: rgba(239, 232, 216, 0.9);
+  text-shadow: 0 0 10px rgba(0, 0, 0, 0.55); white-space: nowrap;
+}
+#found.show { opacity: 0.8; }
+#found i {
+  width: 6px; height: 6px; border-radius: 50%;
+  border: 1px solid rgba(239, 232, 216, 0.45);
+}
+#found i.on { background: rgba(226, 184, 120, 0.9); border-color: transparent; }
+#found i.new { box-shadow: 0 0 10px rgba(226, 184, 120, 0.9); animation: found-new 2.4s ease-out; }
+@keyframes found-new { from { transform: scale(2.2); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { #found i.new { animation: none; } }
+
+/* The pause button stays out of the picture until the pointer moves (touch keeps it). */
+body:not(.touch) #pause-btn { opacity: 0; transition: opacity 0.8s ease; }
+body:not(.touch).pointer-awake #pause-btn, body:not(.touch) #pause-btn:focus-visible { opacity: 0.6; }
+
+#touch-ui { display: none; }
+body.touch.playing #touch-ui { display: block; }
+body.touch #prompt .key { display: none; }
+
+#stick {
+  position: fixed;
+  left: calc(28px + env(safe-area-inset-left));
+  bottom: calc(28px + env(safe-area-inset-bottom));
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 1px solid rgba(239, 232, 216, 0.25);
+  background: rgba(20, 19, 15, 0.12);
+  opacity: 0.7;
+  pointer-events: none;
+}
+#stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: rgba(239, 232, 216, 0.35);
+}
+
+#act-btn {
+  position: fixed;
+  right: calc(28px + env(safe-area-inset-right));
+  bottom: calc(40px + env(safe-area-inset-bottom));
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  border: 1px solid rgba(79, 216, 255, 0.7);
+  background: rgba(20, 19, 15, 0.2);
+  color: var(--ivory);
+  font: 500 12px var(--font);
+  letter-spacing: 0.16em;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+#act-btn.show { opacity: 0.9; pointer-events: auto; }
+
+#start {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 22px;
+  background: #000;
+  transition: opacity 1.2s ease;
+}
+#start.gone { opacity: 0; pointer-events: none; }
+/* Once loaded, the world shows through: the black veil lifts slowly to a vignette. */
+#start { background: radial-gradient(ellipse at 50% 46%, rgba(0, 0, 0, 0.1) 25%, rgba(0, 0, 0, 0.62) 100%); }
+#start .veil { position: absolute; inset: 0; background: #000; transition: opacity 3.5s ease; pointer-events: none; }
+#start.live .veil { opacity: 0; }
+#start > *:not(.veil) { position: relative; }
+#start .title, #start button, #start .sub { text-shadow: 0 0 18px rgba(0, 0, 0, 0.6), 0 0 3px rgba(0, 0, 0, 0.5); }
+#start .title { font-size: clamp(22px, 4vw, 40px); letter-spacing: 0.6em; padding-left: 0.6em; font-weight: 400; }
+#start .buttons { display: flex; gap: 22px; justify-content: center; }
+#start .sub { font-size: 11px; letter-spacing: 0.2em; opacity: 0.35; }
+
+#fallback {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  padding: 16px;
+  text-align: center;
+  background: #000;
+}
+#fallback[hidden] { display: none; }
+
+/* Buttons in menus: text-only, lowercase, spaced like the subtitles. */
+#start button, #menu button {
+  background: none;
+  border: 0;
+  color: var(--ivory);
+  font: 400 12px var(--font);
+  letter-spacing: 0.3em;
+  padding: 10px 6px;
+  opacity: 0.72;
+  cursor: pointer;
+}
+#start button:hover, #menu button:hover, #menu button.on { opacity: 1; }
+#start button:focus-visible, #menu button:focus-visible { outline: 1px solid rgba(239, 232, 216, 0.5); }
+
+#pause-btn {
+  position: fixed;
+  top: calc(14px + env(safe-area-inset-top));
+  right: calc(14px + env(safe-area-inset-right));
+  width: 40px;
+  height: 40px;
+  border: 0;
+  background: none;
+  color: var(--ivory);
+  font: 500 12px var(--font);
+  letter-spacing: 0.1em;
+  opacity: 0.35;
+  cursor: pointer;
+  display: none;
+}
+body.playing #pause-btn { display: block; }
+
+#menu {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  background: rgba(10, 10, 8, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+#menu[hidden] { display: none; }
+#menu { overflow-y: auto; padding: 24px 0; }
+#menu .panel { display: grid; gap: 6px; justify-items: center; text-align: center; }
+#menu .title { font-size: 13px; letter-spacing: 0.5em; opacity: 0.6; margin-bottom: 12px; }
+#menu .row { display: flex; align-items: center; gap: 4px; font-size: 11px; letter-spacing: 0.2em; opacity: 0.9; }
+#menu .row span { opacity: 0.45; margin-right: 10px; }
+#menu .row button { padding: 8px 4px; letter-spacing: 0.15em; }
+#menu .quiet { opacity: 0.4; margin-top: 12px; }
+
+#card {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 16px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 2s ease;
+}
+#card.show { opacity: 1; }
+
+/* A chapter beginning: numeral and title, low left, over the picture. */
+#chapter {
+  position: fixed;
+  left: calc(6vw + env(safe-area-inset-left));
+  bottom: calc(max(14vh, var(--bars, 0px) + 6vh) + env(safe-area-inset-bottom));
+  display: flex; align-items: baseline; gap: 18px;
+  color: var(--ivory);
+  text-shadow: 0 0 14px rgba(0, 0, 0, 0.5);
+  opacity: 0; transition: opacity 2.2s ease; pointer-events: none;
+}
+#chapter.show { opacity: 1; }
+#chapter .n { font-size: 11px; letter-spacing: 0.4em; opacity: 0.6; }
+#chapter .t { font-size: clamp(15px, 2vw, 22px); letter-spacing: 0.45em; }
+
+/* Chapter select on the title screen. */
+#chapters { display: grid; gap: 2px; justify-items: start; min-width: 220px; }
+#chapters[hidden] { display: none; }
+#chapters button { display: flex; gap: 18px; width: 100%; text-align: left; }
+#chapters button .n { width: 2.4em; opacity: 0.5; }
+#chapters button:disabled { opacity: 0.18; cursor: default; }
+#chapters .back { margin-top: 10px; opacity: 0.4; }
+#menu-chapters { display: grid; gap: 0; justify-items: start; margin: 0 0 8px; }
+#menu-chapters[hidden] { display: none; }
+#menu-chapters button { display: flex; gap: 14px; padding: 6px 4px; letter-spacing: 0.2em; font-size: 11px; }
+#menu-chapters button .n { width: 2.4em; opacity: 0.5; }
+#menu-chapters button:disabled { opacity: 0.18; cursor: default; }
+#card .t { font-size: clamp(22px, 4vw, 40px); letter-spacing: 0.6em; padding-left: 0.6em; }
+#card .s { font-size: 11px; letter-spacing: 0.35em; opacity: 0.6; }
+
+body.sub-s #subtitle { font-size: clamp(13px, 1.6vw, 18px); }
+body.sub-l #subtitle { font-size: clamp(19px, 2.8vw, 32px); }
+/* Subtitle backing (accessibility): a soft dark band behind the line. */
+body.sub-bg #subtitle { width: auto; max-width: min(90vw, 900px); padding: 0.35em 0.9em; background: rgba(8, 8, 6, 0.62); border-radius: 3px; text-shadow: none; }
+body.sub-bg #subtitle:empty { display: none; }
+
+/* Loading: a hairline that fills under the title, then gives way to the buttons. */
+#start .loading { width: min(220px, 50vw); margin: 4px auto 0; transition: opacity 0.8s ease; }
+#start .loading.done { opacity: 0; }
+#start .loading .bar { height: 1px; background: rgba(239, 232, 216, 0.14); overflow: hidden; }
+#start .loading .bar i { display: block; height: 100%; width: 0; background: var(--ivory); transition: width 0.4s ease; }
+#start .buttons[hidden] { display: none; }
+#start .buttons { animation: appear 1.2s ease; }
+@keyframes appear { from { opacity: 0; } to { opacity: 1; } }
+
+/* Album of afterimages in the pause menu: small frames, empty ones still waiting. */
+#album { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 6px 0 14px; }
+#album > span { font-size: 11px; letter-spacing: 0.3em; opacity: 0.55; }
+#album .frames { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+#album .frame {
+  width: min(24vw, 150px); aspect-ratio: 16 / 9; border: 1px solid rgba(239, 232, 216, 0.18);
+  background: rgba(239, 232, 216, 0.03); overflow: hidden;
+}
+#album .frame.lit { background: rgba(214, 170, 100, 0.12); }
+#album .frame img { width: 100%; height: 100%; object-fit: cover; display: block; filter: sepia(0.15); }
+
+/* The memory window (story/memoryFrame.ts): above the game, under the fade and the text. */
+#memory {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  display: none;
+}
+
+/* End credits (story/credits.ts): a column rising through the dimmed picture. */
+#credits { position: fixed; inset: 0; overflow: hidden; pointer-events: none; opacity: 0; transition: opacity 3s ease; }
+#credits.show { opacity: 1; }
+#credits .roll { position: absolute; left: 0; right: 0; top: 0; display: grid; gap: 10px; justify-items: center; text-align: center;
+  font-size: clamp(13px, 1.5vw, 17px); letter-spacing: 0.3em; color: var(--ivory); text-shadow: 0 0 12px rgba(0, 0, 0, 0.6); }
+#credits .h { font-size: 11px; letter-spacing: 0.45em; opacity: 0.55; margin-top: 8px; }
+#credits .roll > div:first-child { font-size: clamp(22px, 3.4vw, 36px); letter-spacing: 0.6em; opacity: 1; padding-left: 0.6em; }
+#credits .gap { height: 2.2em; }
+
+/* A reboot between chapters (story/reboot.ts): over the game, under the fade and prompts. */
+#reboot { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+/* A memory spent as power: drained of colour, with a crack across it. */
+#album .frame.spent img { filter: grayscale(1) brightness(0.55) contrast(0.9); }
+#album .frame.spent { position: relative; }
+#album .frame.spent::after {
+  content: ''; position: absolute; inset: 0;
+  background: linear-gradient(118deg, transparent 47%, rgba(170, 220, 255, 0.55) 48%, transparent 49.5%),
+              linear-gradient(64deg, transparent 58%, rgba(170, 220, 255, 0.35) 59%, transparent 60%);
+}
+
+/* Photo mode (core/photoMode.ts): the play UI steps aside; a quiet panel on the right. */
+body.photo #subtitle, body.photo #prompt, body.photo #found, body.photo #pause-btn,
+body.photo #chapter, body.photo #touch-ui, body.photo #skip-btn { visibility: hidden; }
+body.photo #bars { display: none; }
+body.photo.photo-bars #bars { display: block; --bars: max(0px, calc((100vh - 100vw / 2.39) / 2)); }
+#photo {
+  position: fixed;
+  top: calc(16px + env(safe-area-inset-top));
+  right: calc(16px + env(safe-area-inset-right));
+  width: min(300px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  display: grid; gap: 6px;
+  padding: 14px 16px;
+  background: rgba(10, 10, 8, 0.6);
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  font-size: 11px; letter-spacing: 0.14em;
+  transition: opacity 0.3s ease;
+}
+#photo[hidden], body.photo-clean #photo { display: none; }
+#photo .head { font-size: 12px; letter-spacing: 0.35em; margin-bottom: 6px; }
+#photo .hint { display: block; margin-top: 4px; font-size: 9px; letter-spacing: 0.1em; opacity: 0.45; }
+#photo label { display: grid; grid-template-columns: 72px 1fr 56px; align-items: center; gap: 8px; opacity: 0.85; }
+#photo output { text-align: right; opacity: 0.6; font-variant-numeric: tabular-nums; }
+#photo input[type=range] { width: 100%; accent-color: var(--ivory); }
+#photo .row { display: flex; flex-wrap: wrap; gap: 2px 4px; }
+#photo button {
+  background: none; border: 0; color: var(--ivory); font: 400 11px var(--font); letter-spacing: 0.15em;
+  padding: 6px 4px; opacity: 0.55; cursor: pointer;
+}
+#photo button:hover, #photo button.on { opacity: 1; }
+#photo .save { opacity: 0.9; }
+#photo.saved .save::after { content: ' ✓'; }
+body.touch #photo { top: auto; bottom: calc(12px + env(safe-area-inset-bottom)); max-height: 46vh; }

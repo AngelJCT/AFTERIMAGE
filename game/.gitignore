@@ -1,0 +1,6 @@
+node_modules
+dist
+.shots/
+dist-web
+afterimage-web.zip
+.trailer/

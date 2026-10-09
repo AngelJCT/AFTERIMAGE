@@ -1,0 +1,51 @@
+body.inspecting { background: #151918; overflow: hidden; }
+body.inspecting > :not(#inspection):not(script):not(style):not(link) { display: none !important; }
+#inspection { position: fixed; inset: 0; z-index: 1000; color: #e7e6df; font: 13px/1.4 system-ui, sans-serif; display: flex; flex-direction: column; background: #151918; }
+#inspection * { box-sizing: border-box; }
+#inspection header { display: flex; justify-content: space-between; align-items: center; padding: 18px 24px 14px; border-bottom: 1px solid #343a36; }
+#inspection h1 { font: 24px/1.2 Georgia, serif; font-weight: normal; margin: 4px 0 0; letter-spacing: -.02em; }
+#inspection .study-kicker { font-size: 10px; letter-spacing: .16em; color: #b4b5a6; }
+#inspection .study-note, #inspection .study-bottom { color: #aeb3a9; font-size: 11px; }
+#inspection .study-tools { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; padding: 12px 24px; }
+#inspection label { display: flex; flex-direction: column; gap: 4px; color: #b7bbae; font-size: 11px; }
+#inspection button, #inspection select, #inspection .study-file { font: 12px system-ui; border: 1px solid #495046; border-radius: 4px; background: #202720; color: #eeeee4; padding: 8px 10px; letter-spacing: normal; text-transform: none; cursor: pointer; }
+#inspection button:hover, #inspection select:hover, #inspection .study-file:hover { background: #303a2e; }
+#inspection button:disabled { opacity: .4; cursor: default; }
+#inspection :focus-visible { outline: 2px solid #b8d8c1; outline-offset: 3px; }
+#inspection [data-act=play], #inspection [data-act=capture] { background: #c8d0b9; color: #172217; }
+#inspection .study-file { position: relative; overflow: hidden; height: 33px; }
+#inspection .study-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+#inspection .study-clear { flex-direction: row; align-items: center; height: 33px; gap: 6px; }
+#inspection .study-clear input { accent-color: #bacbad; }
+#inspection .study-views { flex: 1; min-height: 180px; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #495046; }
+#inspection figure { margin: 0; background: #1b201d; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+#inspection figcaption { display: flex; justify-content: space-between; padding: 9px 16px; font-size: 10px; letter-spacing: .12em; background: #202620; }
+#inspection figcaption span { letter-spacing: 0; color: #aeb3a9; }
+#inspection .study-stage, #inspection .study-image { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+#inspection #view { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+#inspection .study-image { display: flex; justify-content: center; align-items: center; }
+#inspection .study-image img { height: 100%; width: 100%; object-fit: contain; transform-origin: center; }
+#inspection .study-views[data-layout=overlay] { grid-template-columns: 1fr; }
+#inspection [data-layout=overlay] figure { grid-area: 1 / 1; }
+#inspection [data-layout=overlay] .study-reference { pointer-events: none; background: transparent; }
+#inspection [data-layout=overlay] .study-reference figcaption { visibility: hidden; }
+#inspection [data-layout=solo] { grid-template-columns: 1fr; }
+#inspection [data-layout=solo] .study-reference { display: none; }
+#inspection footer { padding: 12px 24px; border-top: 1px solid #343a36; }
+#inspection .study-transport { display: flex; gap: 8px; align-items: center; }
+#inspection .study-timeline { flex: 1; flex-direction: row; align-items: center; gap: 8px; }
+#inspection .study-timeline input { width: 100%; }
+#inspection input[type=range] { accent-color: #bacbad; }
+#inspection .study-time { min-width: 55px; font-variant-numeric: tabular-nums; }
+#inspection .study-bottom { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; }
+#inspection .study-status { min-width: 0; overflow-wrap: anywhere; user-select: text; }
+#inspection .study-align { display: flex; gap: 12px; padding: 0 24px 10px; align-items: center; }
+#inspection .study-align[hidden] { display: none; }
+#inspection .study-align label { flex-direction: row; align-items: center; gap: 8px; }
+@media (max-width: 800px) {
+  #inspection header { padding: 12px; } #inspection .study-note { display: none; }
+  #inspection .study-tools { padding: 10px 12px; gap: 8px; }
+  #inspection footer { padding: 10px 12px; } #inspection .study-transport { flex-wrap: wrap; }
+  #inspection .study-timeline { min-width: 140px; } #inspection .study-bottom > span:last-child { display: none; }
+  #inspection .study-align { flex-wrap: wrap; padding: 0 12px 10px; }
+}
