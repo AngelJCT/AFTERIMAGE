@@ -7,7 +7,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { mulberry32 } from '../core/noise';
 import { PALETTE } from '../core/palette';
-import { ARCHES, BEAM, BOUNDS, CROSS_WAKE, EXIT, GATE, SQUEEZE, STILL_POOL, bumpNormal, heightAt, WAKE_POINT } from './terrain';
+import { ARCHES, BEAM, BOUNDS, CROSS_WAKE, EXIT, GATE, POOL, SQUEEZE, STILL_POOL, bumpNormal, heightAt, WAKE_POINT } from './terrain';
 import { SUN_DIR } from './atmosphere';
 
 /**
@@ -18,6 +18,9 @@ const toSun = new THREE.Vector2(SUN_DIR.x, SUN_DIR.z).normalize();
 export const HERO_TREES = [
   { name: 'tree_arch_a', x: WAKE_POINT.x + toSun.x * 16, z: WAKE_POINT.z + toSun.y * 16, yaw: 1.9, scale: 1.2 },
   { name: 'tree_tall_b', x: WAKE_POINT.x + toSun.x * 14 + 2.4, z: WAKE_POINT.z + toSun.y * 14 - 1.0, yaw: 0.4, scale: 1.1 },
+  // A leaning tree on the far bank balances the heavier trunks on the left. Its
+  // roots and crown grow away from the pool's approach and the route to the mirror.
+  { name: 'tree_leaning', x: POOL.x + 4.4, z: POOL.z - 6.0, yaw: -0.5, scale: 1.1 },
 ];
 import { groveSpots } from './grove';
 
@@ -159,10 +162,11 @@ export function groveMaterial(barkMap: THREE.Texture | null = null) {
   const vary = mx_fractal_noise_float(positionWorld.mul(0.6), 2, 2, 0.5);
   const crust = clamp(crustBase.add(vary.mul(0.35)), 0.0, 1.0);
   const rust = smoothstep(0.35, 0.8, rustBase);
-  const bark = mix(color(PALETTE.charcoal), color(PALETTE.bone).mul(0.78), smoothstep(0.35, 0.7, crust));
-  m.colorNode = mix(bark, color(PALETTE.rust).mul(1.2), rust.mul(0.85)).mul(mix(float(0.35), float(1.0), ao));
-  m.roughnessNode = mix(float(0.5), float(0.92), crust).add(rust.mul(0.08));
-  m.metalnessNode = mix(float(0.3), float(0.0), crust);
+  const bark = mix(color(0x474d48), color(0xbfc4bc), smoothstep(0.28, 0.73, crust));
+  m.colorNode = mix(bark, color(PALETTE.rust), rust.mul(0.38)).mul(mix(float(0.48), float(1.0), ao));
+  m.roughnessNode = mix(float(0.76), float(0.94), crust).add(rust.mul(0.04));
+  m.envMapIntensity = 0.55;
+  m.metalnessNode = mix(float(0.06), float(0.0), crust);
   // Relief (metres): bark ridges running mostly up the limbs, fine grit, a crumbly surface
   // where the pale crust sits and flaking where it's rusted.
   const pw = positionWorld;
@@ -176,16 +180,18 @@ export function groveMaterial(barkMap: THREE.Texture | null = null) {
   const clusters = smoothstep(-0.1, 0.45, mx_fractal_noise_float(pw.mul(2.6).add(vec3(7.1, 0, 3.3)), 2, 2, 0.5))
     .mul(smoothstep(0.2, 0.55, crust));
   const beads = bead.mul(clusters);
-  const relief = ridge.mul(ridge).mul(0.0045).mul(float(1).sub(crust.mul(0.7)))
-    .add(grit.mul(0.0009))
-    .add(crumb.mul(0.0025).mul(crust))
+  const relief = ridge.mul(ridge).mul(0.0025).mul(float(1).sub(crust.mul(0.7)))
+    .add(grit.mul(0.0006))
+    .add(crumb.mul(0.0012).mul(crust))
     .add(crumb.mul(0.002).mul(rust))
-    .add(beads.mul(0.0045));
+    .add(beads.mul(0.0018));
   m.normalNode = barkMap ? bumpNormal(relief, normalMap(texture(barkMap, uv()))) : bumpNormal(relief);
   // The same grain in the colour: grooves hold dark, ridges catch a little light, so it
   // reads even in shade.
-  m.colorNode = (m.colorNode as any).mul(mix(float(0.62), float(1.12), ridge.mul(ridge)).mul(float(1).sub(crumb.mul(crust).mul(0.25))))
-    .mul(mix(float(1), mix(float(0.45), float(1.18), bead), clusters));
-  m.roughnessNode = (m.roughnessNode as any).sub(beads.mul(0.25));
+  m.colorNode = (m.colorNode as any).mul(mix(float(0.80), float(1.08), ridge.mul(ridge)).mul(float(1).sub(crumb.mul(crust).mul(0.16))))
+    .mul(mix(float(1), mix(float(0.64), float(1.12), bead), clusters));
+  const wetBase = smoothstep(0.20, -0.015, positionWorld.y);
+  m.colorNode = (m.colorNode as any).mul(float(1).sub(wetBase.mul(0.20)));
+  m.roughnessNode = (m.roughnessNode as any).sub(beads.mul(0.08)).sub(wetBase.mul(0.16));
   return m;
 }

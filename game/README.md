@@ -9,6 +9,12 @@ npm run dev      # http://localhost:5180
 
 Dev URL flags:
 - `?inspect=still`: development-only character/reference viewer. Also accepts `walk`, `run`, `start-stop`, `walk-run`, `turns`, and `slope`; older `scene` / `portrait` links still work. Locked cameras, lighting presets, source artwork, overlays, timeline seeking and frame stepping bypass the story without changing saved progress. **Save comparison** downloads a labelled PNG pair and saves a clean frame in `.shots/`. **Copy view link** preserves the camera, light, time, reference and alignment. See [the comparison guide](docs/movement-reference.md).
+- `?inspect=still&view=artwork&ref=artwork&q=high`: the [flooded grove visual milestone](docs/art-milestone.md), with a fixed 65 mm camera and depth of field for comparing shipped assets with the key artwork.
+- The [layered armor study](docs/layered-armor.md) documents the overlapping ceramic geometry, matched before/after images, and rebuild command.
+- The [opening grove and pool pass](docs/environment-pass.md) compares the revised ground, shorelines, trees, water and lighting, with validation and rendering costs.
+- The [grove composition and refuge gate pass](docs/gate-approach-pass.md) refines the undergrowth, masonry, paving and arcade details, with matched daylight/overcast comparisons and gate mechanism checks.
+- The [lighting and atmospheric depth pass](docs/lighting-depth-pass.md) balances the wake-to-gate route, adds contact shading on high quality, and makes sun glow and surface sparkle follow the weather.
+- The [landmark geometry pass](docs/landmark-geometry-pass.md) gives trees a stronger taper, branching roots and smaller mineral growth, and adds fractured rock beds with clear pool approaches.
 - `?beat=<name>` jumps straight to a beat: `coldOpen`, `lying`, `eyesClosed`, `rise`, `explore`, `reflection`, `ending`, `grove`, `gate`, `memory`, `trace`
 - Dev builds show a **skip ›** button (top-right, or press N). It skips the current cutscene: in the grove it counts the next afterimage as found and resumes after it; elsewhere it moves on to the next beat.
 - `?q=high` or `?q=low` forces a quality tier (by default touch devices get `low`)

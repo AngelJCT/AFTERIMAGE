@@ -7,7 +7,7 @@ import * as THREE from 'three/webgpu';
  *   - the Part I film: blender/scripts/film_stats.py AFTERIMAGE.mp4
  *   - the game's own output before grading (in-browser readback)
  * The LUT moves the game's Lab mean/spread part of the way toward the film's (Reinhard
- * transfer), then adds the film's split tone: olive-yellow shadows, warmer highlights.
+ * transfer), then adds restrained cool shadows and warmer highlights.
  */
 export const FILM = { mean: [50.47, 0.06, 10.37], std: [22.54, 2.91, 6.92] };
 // Measured with tone mapping, light shafts and god rays on, before the LUT.
@@ -22,10 +22,10 @@ export interface GradeParams {
 }
 
 export const DEFAULT_GRADE: GradeParams = {
-  strength: 0.8,
+  strength: 0.48,
   lightStrength: 0.38,
   maxChroma: 2.2,
-  shadowTint: [-0.9, 1.2],
+  shadowTint: [-0.10, -1.2],
   highlightTint: [0.5, 1.6],
 };
 

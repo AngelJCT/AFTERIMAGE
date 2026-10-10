@@ -1,11 +1,12 @@
 import * as THREE from 'three/webgpu';
 import {
   Fn, Loop, uniform, uniformArray, vec2, vec3, vec4, float, color, positionWorld, cameraPosition,
-  normalize, length, exp, cos, sin, max, dot, pow, mix, smoothstep, reflector, texture, reflect, mx_noise_float,
+  normalize, length, exp, cos, sin, max, min, dot, pow, mix, smoothstep, reflector, texture, reflect, mx_noise_float,
   floor, fract, hash,
 } from 'three/tsl';
 import { PALETTE } from '../core/palette';
-import { MIRROR, TERRAIN_SIZE, WATER_LEVEL } from './terrain';
+import { MIRROR, POOL, TERRAIN_SIZE, WATER_LEVEL } from './terrain';
+import { uDirectSun } from './atmosphere';
 
 const MAX_RIPPLES = 24;
 
@@ -38,11 +39,14 @@ export class Water {
     scene.add(reflection.target);
 
     const uGust = this.uGust;
+    const exposed = (p: any) => min(
+      smoothstep(2.4, 4.2, length(p.sub(vec2(MIRROR.x, MIRROR.z)))),
+      smoothstep(1.4, 3.6, length(p.sub(vec2(POOL.x, POOL.z)))),
+    );
     const catsPaws = (p: any, t: any) => {
       const drift = vec2(t.mul(1.1), t.mul(0.38));
       const n = mx_noise_float(vec3(p.sub(drift).mul(vec2(0.16, 0.22)), t.mul(0.05)));
-      const still = smoothstep(2.4, 4.2, length(p.sub(vec2(MIRROR.x, MIRROR.z))));
-      return smoothstep(0.15, 0.55, n).mul(uGust.mul(0.9).add(0.12)).mul(still);
+      return smoothstep(0.15, 0.55, n).mul(uGust.mul(0.9).add(0.12)).mul(exposed(p));
     };
     // Ring slopes alone (d height / d xz): the rings also catch a little light on their crests.
     const rings = Fn(() => {
@@ -72,7 +76,8 @@ export class Water {
       const a1 = cos(p.x.mul(3.1).add(p.y.mul(1.7)).add(t.mul(0.9))).mul(0.012);
       const a2 = cos(p.x.mul(-2.3).add(p.y.mul(3.7)).add(t.mul(1.3))).mul(0.010);
       const a3 = sin(p.x.mul(9.0).sub(p.y.mul(7.0)).add(t.mul(2.1))).mul(0.004);
-      g.addAssign(vec2(a1.mul(3.1).sub(a2.mul(2.3)).add(a3.mul(9.0)), a1.mul(1.7).add(a2.mul(3.7)).sub(a3.mul(7.0))));
+      g.addAssign(vec2(a1.mul(3.1).sub(a2.mul(2.3)).add(a3.mul(9.0)), a1.mul(1.7).add(a2.mul(3.7)).sub(a3.mul(7.0)))
+        .mul(exposed(p).mul(0.65).add(0.22)).mul(float(1).sub(this.uGlass.mul(0.9))));
       // Cat's paws: patches of wind-roughened water drifting downwind; stronger in gusts.
       // The still pool is sheltered.
       const paws = catsPaws(p, t);
@@ -82,7 +87,7 @@ export class Water {
       // Chop: fine wavelets running every way (six directions, 2–5 cm), always a little there
       // and more in the wind, so a bright reflection breaks into shards instead of a smear.
       // Not on the still pool or the other side's glass.
-      const calm = smoothstep(2.6, 4.2, length(p.sub(vec2(MIRROR.x, MIRROR.z)))).mul(float(1).sub(this.uGlass));
+      const calm = exposed(p).mul(float(1).sub(this.uGlass));
       const chopAmp = uGust.mul(0.6).add(0.55).mul(calm);
       const dirs: [number, number, number, number][] = [
         [0.95, 0.31, 21, 2.9], [-0.42, 0.91, 27, 3.7], [0.66, -0.75, 33, 4.3],
@@ -90,7 +95,7 @@ export class Water {
       ];
       for (const [dx, dz, k, w] of dirs) {
         const ph = p.x.mul(dx * k).add(p.y.mul(dz * k)).add(t.mul(w)).add(dx * 5.1);
-        const a = cos(ph).mul((0.0022 * 21) / k);
+        const a = cos(ph).mul((0.00085 * 21) / k);
         g.addAssign(vec2(a.mul(dx * k), a.mul(dz * k)).mul(chopAmp));
       }
       return g;
@@ -106,8 +111,10 @@ export class Water {
 
     // Shoreline: depth from baked terrain map.
     const depthUV = positionWorld.xz.div(TERRAIN_SIZE).add(0.5);
-    const depth = texture(depthTex, depthUV).r;
-    const shore = smoothstep(0.0, 0.06, depth);
+    // Green encodes signed terrain height (m + 0.5), not normalized depth. Interpolate
+    // across the actual waterline, then convert to metres before testing shallow water.
+    const depth = max(float(0.5).sub(texture(depthTex, depthUV).g), 0);
+    const shore = smoothstep(0.002, 0.035, depth);
 
     const glintDir = reflect(viewDir, nWorld);
     const toSun = max(dot(glintDir, uSun), 0.0);
@@ -123,44 +130,48 @@ export class Water {
       const q = positionWorld.xz.mul(scale);
       const cell = floor(q), f = fract(q);
       const id = cell.x.mul(127.1).add(cell.y.mul(311.7)).add(seed);
-      const phase = floor(uTime.mul(rate).mul(hash(id).mul(0.8).add(0.6)).add(hash(id.add(7.0)).mul(10.0)));
-      const k = id.add(phase.mul(57.3));
-      const n = normalize(vec3(slope.x.add(hash(k).sub(0.5).mul(tilt)).negate(), 1.0, slope.y.add(hash(k.add(3.1)).sub(0.5).mul(tilt)).negate()));
+      // Continuous tilt avoids re-randomizing whole facets from one frame to the next.
+      const k = id;
+      const phase = uTime.mul(rate * 0.35).add(hash(id.add(7)).mul(6.28));
+      const tiltX = hash(k).sub(0.5).mul(tilt).add(sin(phase).mul(0.028));
+      const tiltZ = hash(k.add(3.1)).sub(0.5).mul(tilt).add(cos(phase.mul(0.83)).mul(0.028));
+      const n = normalize(vec3(slope.x.add(tiltX).negate(), 1.0, slope.y.add(tiltZ).negate()));
       const a = max(dot(reflect(viewDir, n), uSun), 0.0);
       // A small round point inside the cell, not the whole square.
       const at = vec2(hash(k.add(5.3)), hash(k.add(9.7))).mul(0.5).add(0.25);
-      const dot_ = smoothstep(0.32, 0.08, length(f.sub(at)));
-      return smoothstep(0.985, 0.9985, a).mul(dot_);
+      const footprint = length(q.fwidth());
+      const dot_ = smoothstep(float(0.24).add(footprint), float(0.06).sub(footprint), length(f.sub(at)));
+      return smoothstep(0.989, 0.999, a).mul(dot_).mul(smoothstep(1.2, 0.35, footprint));
     };
     const sparkle = facets(18.0, 0.55, 2.2, 0.0).add(facets(46.0, 0.7, 3.4, 41.0).mul(0.6))
       .mul(smoothstep(0.0, 0.2, uSun.y)).mul(float(1).sub(this.uGlass));
-    const glint = pow(toSun, 1400.0).mul(3.0)
-      .add(pow(toSun, 80.0).mul(0.1))
-      .add(twinkle.mul(pow(toSun, 24.0)).mul(1.6))
-      .add(sparkle.mul(14.0));
+    const glint = pow(toSun, 1400.0).mul(1.1)
+      .add(pow(toSun, 80.0).mul(0.035))
+      .add(twinkle.mul(pow(toSun, 24.0)).mul(0.55))
+      .add(sparkle.mul(3.0)).mul(smoothstep(0.008, 0.09, depth)).mul(uDirectSun);
 
     // Mineral scum drifting in pale patches near the shores, and small floating flecks (the
     // films' shallows), never on the mirror pool or the other side's glass.
     const scumN = mx_noise_float(vec3(positionWorld.xz.mul(0.32), uTime.mul(0.01)));
     const nearShore = float(1).sub(smoothstep(0.04, 0.5, depth));
-    const scum = smoothstep(0.25, 0.6, scumN).mul(nearShore).mul(0.55)
-      .add(smoothstep(0.78, 0.9, mx_noise_float(vec3(positionWorld.xz.mul(7.0), 3.0))).mul(nearShore.add(0.2)).mul(0.5));
+    const scum = smoothstep(0.25, 0.6, scumN).mul(nearShore).mul(0.25)
+      .add(smoothstep(0.78, 0.9, mx_noise_float(vec3(positionWorld.xz.mul(7.0), 3.0))).mul(nearShore).mul(0.18));
     // The mirror pool is deep and dark: it reflects almost like glass, even looking straight down.
     const mirror = max(smoothstep(3.6, 2.6, length(positionWorld.xz.sub(vec2(MIRROR.x, MIRROR.z)))), this.uGlass);
-    const tint = mix(color(PALETTE.hazeDeep).mul(0.22), color(PALETTE.charcoal).mul(0.35), mirror);
+    const tint = mix(mix(color(0x747c70).mul(0.32), color(0x424d49).mul(0.24), smoothstep(0.03, 0.4, depth)), color(PALETTE.charcoal).mul(0.35), mirror);
     mat.colorNode = Fn(() => {
       // Where the reflection is blinding (the sun's path), it comes apart on the chop into
       // bright shards and points with darker water between, as in the boards.
       // (The sun's disc itself is left to the glitter: the mirrored sky is capped below it.)
       const raw = vec3(reflection.rgb);
       const lumR = raw.dot(vec3(0.3, 0.5, 0.2));
-      const cap = mix(float(1e4), float(2.2), float(1).sub(mirror));
+      const cap = mix(float(1e4), float(1.0), float(1).sub(mirror));
       const refl0 = raw.mul(cap.div(max(lumR, cap)));
       const hot = smoothstep(0.7, 2.0, lumR).mul(float(1).sub(mirror));
       const breakUp = smoothstep(0.42, 0.62, mx_noise_float(vec3(positionWorld.xz.mul(vec2(11.0, 19.0)), uTime.mul(1.3))));
-      const refl = refl0.mul(mix(float(1), breakUp.mul(1.2).add(0.12), hot));
+      const refl = refl0.mul(mix(float(1), breakUp.mul(0.85).add(0.18), hot));
       // Roughened patches reflect less of the sky.
-      const k = mix(fresnel.mul(0.85).add(0.12), float(0.9), mirror).mul(float(1).sub(catsPaws(positionWorld.xz, uTime).mul(0.25)));
+      const k = mix(fresnel.mul(0.82).add(0.08), float(0.9), mirror).mul(float(1).sub(catsPaws(positionWorld.xz, uTime).mul(0.25)));
       const c = mix(tint, refl, k);
       const crest = length(rings).mul(1.3).min(0.6);
       const clean = float(1).sub(mirror);

@@ -19,7 +19,7 @@ The viewer does not run the story, expose its skip shortcut, or save checkpoints
 
 **Save stride** is available for Walk and Run. It warms up the gait, advances to the next heel strike, then saves 24 frames of one stride in `.shots/`. `&frames=8` through `&frames=60` controls sampling; `&label=name` names the sequence. These are actual simulation poses without resetting the stride phase underneath planted feet.
 
-The camera is fixed relative to the route, so a turning character rotates within the shot. Body framing fits the entire character; portrait uses 85 mm. Grain, autofocus blur, camera shake, random blinks and adaptive resolution are disabled for these studies. The shaders use game time during inspection. Environmental particles are not a pixel-exact baseline across page reloads; use the rig, framing and light as the comparison anchors.
+The camera is fixed relative to the route, so a turning character rotates within the shot. Body framing fits the entire character; portrait uses 85 mm. Grain, autofocus blur, camera shake, random blinks and adaptive resolution are disabled for these studies. **Artwork · grove** uses 65 mm and a fixed, restrained depth of field on high quality; the other views stay sharp. See the [visual milestone](art-milestone.md) for its matched reference and asset changes. The shaders use game time during inspection. Environmental particles are not a pixel-exact baseline across page reloads; use the rig, framing and light as the comparison anchors.
 
 ## Motion checks
 

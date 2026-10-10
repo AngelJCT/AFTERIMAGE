@@ -15,6 +15,7 @@ import { gateGoal, openWayToGate } from './partII';
 import { MemoryTrail } from '../world/memoryTrail';
 import { handShot, topDown } from './shots';
 import { SiteGhost } from './siteGhost';
+import { ATMOSPHERE_BASE } from '../world/atmosphere';
 
 /**
  * The grove chapter, after the film's prologue: afterimages.
@@ -428,7 +429,7 @@ async function poolAfterimage(g: Game) {
 }
 
 /** The mist over the grove thins (0 = as it was, 1 = lifted toward the refuge). */
-const MIST0 = { mist: 0.42, fog: 0.019 };
+const MIST0 = ATMOSPHERE_BASE;
 export function liftMist(g: Game, k: number) {
   if (g.gate && k > 0) g.gate.root.visible = true;
   g.atmos.uMist.value = MIST0.mist + (0.18 - MIST0.mist) * k;

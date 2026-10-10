@@ -8,7 +8,7 @@ import { mulberry32 } from '../core/noise';
 import { PALETTE } from '../core/palette';
 import { bumpNormal, heightAt, MIRROR, POOL, SALT_FLAT, WAKE_POINT, WATER_LEVEL, LIFT, RUINS, gateLocal } from './terrain';
 import { distToGrovePath, distToRoute, treeSpots } from './grove';
-import { groveMaterial } from './groveKit';
+import { groveMaterial, HERO_TREES } from './groveKit';
 
 /**
  * The grove floor from the Blender rock kit (blender/scripts/rock_kit.py): loose pebbles and
@@ -27,6 +27,14 @@ export async function loadRockKit(url: string, count: number, onProgress?: (k: n
   const pool2 = new THREE.Vector2(POOL.x, POOL.z);
   const mirror2 = new THREE.Vector2(MIRROR.x, MIRROR.z);
   const placements = new Map<string, THREE.Matrix4[]>();
+  const radii = new Map<string, number>();
+  for (const [name, src] of kit) {
+    if (!/^(crust|slab)/.test(name)) continue;
+    src.geometry.computeBoundingBox();
+    const box = src.geometry.boundingBox!.clone().applyMatrix4(src.matrixWorld);
+    radii.set(name, Math.hypot(Math.max(Math.abs(box.min.x), Math.abs(box.max.x)),
+      Math.max(Math.abs(box.min.z), Math.abs(box.max.z))));
+  }
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler();
   const blockers: { a: THREE.Vector2; b: THREE.Vector2; r: number }[] = [];
   const place = (name: string, x: number, z: number, scale: number, sink: number, tilt = 0.12) => {
@@ -36,7 +44,19 @@ export async function loadRockKit(url: string, count: number, onProgress?: (k: n
     if (!src) return;
     e.set((rng() - 0.5) * tilt, rng() * Math.PI * 2, (rng() - 0.5) * tilt);
     q.setFromEuler(e);
-    m.compose(new THREE.Vector3(x, heightAt(x, z) - sink, z), q, new THREE.Vector3(scale, scale * (0.8 + rng() * 0.4), scale));
+    const vertical = 0.8 + rng() * 0.4;
+    // Flat outcrops are decorative, not walkable surfaces. The new fractured beds
+    // can reach farther than their centres; keep their entire footprint off the
+    // routes and interaction pools. Consume the same seed values before trimming.
+    const radius = radii.get(name);
+    if (radius) {
+      const v = new THREE.Vector2(x, z);
+      const room = Math.min(distToRoute(v) - 0.85, distToGrovePath(v) - 0.65,
+        v.distanceTo(pool2) - 2.2, v.distanceTo(mirror2) - 2.8);
+      if (room <= 0.12) return;
+      scale = Math.min(scale, room / (radius * 1.06));
+    }
+    m.compose(new THREE.Vector3(x, heightAt(x, z) - sink, z), q, new THREE.Vector3(scale, scale * vertical, scale));
     // Meshopt keeps quantised meshes in a scaled space with the inverse on the node.
     (placements.get(name) ?? placements.set(name, []).get(name)!).push(m.clone().multiply(src.matrixWorld));
   };
@@ -158,6 +178,50 @@ export async function loadRockKit(url: string, count: number, onProgress?: (k: n
     if (!clear(v, 0.9) || heightAt(x, z) < WATER_LEVEL + 0.02) continue;
     place(rng() < 0.5 ? 'gravel_a' : 'gravel_b', x, z, 0.7 + rng() * 0.7, 0.005, 0.04);
     i++;
+  }
+
+  // Small fragments ground the opening shot. Add them after the existing placements so
+  // consuming random rotations cannot move the world's boulders or collision obstacles.
+  const detailRng = mulberry32(9107);
+  for (let i = 0; i < 34; i++) {
+    const a = detailRng() * Math.PI * 2, r = 0.65 + Math.sqrt(detailRng()) * 2.1;
+    const x = WAKE_POINT.x + Math.sin(a) * r, z = WAKE_POINT.z + Math.cos(a) * r;
+    if (Math.abs(x - WAKE_POINT.x) < 0.45 || heightAt(x, z) < WATER_LEVEL - 0.1) continue;
+    place('pebble_a', x, z, 0.18 + detailRng() * 0.4, 0.008, 0.18);
+  }
+
+  // A few related beds on the pool's banks give the scattered crust a geological
+  // direction. Sample the low side of each bed so its base settles into the shore.
+  // These remain below step height and outside the kneeling area.
+  const shoreBeds = [
+    { x: POOL.x - 4.2, z: POOL.z + 1.7, scale: 0.82, yaw: 0.3 },
+    { x: POOL.x + 3.6, z: POOL.z - 3.0, scale: 0.7, yaw: 0.45 },
+  ];
+  for (const bed of shoreBeds) {
+    for (let i = 0; i < 3; i++) {
+      const scale = bed.scale * (i === 0 ? 1 : 0.32 + detailRng() * 0.14);
+      const x = bed.x + (i === 0 ? 0 : (i === 1 ? -0.85 : 0.8));
+      const z = bed.z + (i === 0 ? 0 : 0.42 + detailRng() * 0.3);
+      const src = kit.get(i === 0 ? 'crust_b' : 'slab')!;
+      const seat = Math.min(heightAt(x, z), heightAt(x - scale, z), heightAt(x + scale, z),
+        heightAt(x, z - scale * 0.6), heightAt(x, z + scale * 0.6));
+      e.set(0, bed.yaw + (detailRng() - 0.5) * 0.22, 0);
+      q.setFromEuler(e);
+      m.compose(new THREE.Vector3(x, seat - 0.018, z), q, new THREE.Vector3(scale, scale, scale));
+      (placements.get(src.name) ?? placements.set(src.name, []).get(src.name)!).push(m.clone().multiply(src.matrixWorld));
+    }
+  }
+
+  // Small fragments and fallen twigs caught between the landmark trees' roots.
+  // Appended after all solid props so their seeded placements and blockers stay stable.
+  for (const tree of HERO_TREES) {
+    for (let i = 0; i < 9; i++) {
+      const a = detailRng() * Math.PI * 2, radius = 0.42 + detailRng() * 0.68;
+      const x = tree.x + Math.cos(a) * radius, z = tree.z + Math.sin(a) * radius;
+      if (!clear(new THREE.Vector2(x, z), 1.2)) continue;
+      place(i % 4 === 0 ? 'twig_c' : i % 3 === 0 ? 'slab' : 'chunk_b', x, z,
+        0.16 + detailRng() * 0.22, 0.016, 0.1);
+    }
   }
 
   const mat = rockMaterial();

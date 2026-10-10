@@ -6,6 +6,7 @@ import { ARCHES, EXIT, heightAt } from './terrain';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { groveMaterial } from './groveKit';
+import { gateMaterial } from './gate';
 
 /**
  * The Blender-built arcade (blender/scripts/arches_kit.py): conduit piers splitting into
@@ -23,10 +24,11 @@ export async function loadArches(url: string, onProgress?: (k: number) => void) 
   root.position.set(ARCHES.x, heightAt(ARCHES.x, ARCHES.z), ARCHES.z);
   root.rotation.y = Math.atan2(-across.z, across.x);
   const mat = groveMaterial();
+  const masonry = gateMaterial('masonry');
   root.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
-    m.material = mat;
+    m.material = m.name.startsWith('deck_') ? masonry : mat;
     m.castShadow = true;
     m.receiveShadow = true;
   });
@@ -44,10 +46,11 @@ export async function loadCanopy(url: string, gateRoot: THREE.Object3D, scale = 
   loader.setMeshoptDecoder(MeshoptDecoder);
   const gltf = await loader.loadAsync(url);
   const mat = groveMaterial();
+  const masonry = gateMaterial('masonry');
   gltf.scene.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
-    m.material = mat;
+    m.material = m.name.startsWith('deck_') ? masonry : mat;
     m.castShadow = true;
     m.receiveShadow = true;
   });

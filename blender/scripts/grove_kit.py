@@ -33,34 +33,42 @@ def rand_unit(r):
 class Skeleton:
     def __init__(self):
         self.pos, self.rad, self.parent = [], [], []
+        self.broken = set()
     def add(self, p, r, parent):
         self.pos.append(p.copy()); self.rad.append(r); self.parent.append(parent)
         return len(self.pos) - 1
 
 def grow(sk, r, start, parent, d, length, radius, depth, droop, seg):
     """One branch as a chain of nodes; spawns children along it."""
+    # Small lateral twigs stay short; otherwise a full-length branch on a very thin
+    # parent becomes an implausible wire across the sky.
+    if radius < 0.09: length = min(length, radius * 32 + 0.18)
     n = max(3, int(length / seg))
     p = start.copy(); d = d.copy(); idx = parent
     chain = []
     # A slow coil about the branch's own axis: the limbs twist like old vines (the boards).
-    # (From their own random stream, so each tree keeps the skeleton, and the footprint in the
-    # grove, it always had: paths and framed shots were laid out round those.)
+    # Shape variation has its own random stream. Runtime instance placement remains separate.
     rc = random.Random(len(sk.pos) * 7919 + depth * 104729 + int(length * 1000))
     coil_axis = rand_unit(rc); coil_phase = rc.random() * math.tau; coil = 0.07 + 0.06 * rc.random()
-    # Beads: knots strung along the limb at a spacing that follows its thickness.
+    # Independent shape variation keeps the placement seed stable. Some terminal limbs
+    # stop in a weathered break; the rest taper continuously instead of ending in a spike.
+    broken = depth == 0 and radius > 0.035 and rc.random() < 0.26
+    stop = max(3, int(n * rc.uniform(0.55, 0.8))) if broken else n
+    # Knots are irregular and subdued enough to leave the main silhouette readable.
     bead_every = max(2.0, min(4.0, radius * 11)); bead_phase = rc.random() * math.tau
-    for i in range(1, n + 1):
+    for i in range(1, stop + 1):
         t = i / n
         twist = coil_axis.cross(d) * math.sin(i * 0.55 + coil_phase) * coil
         d = (d + rand_unit(r) * 0.22 + twist + Vector((0, 0, -droop * (0.4 + t)))).normalized()
         p = p + d * (length / n)
-        # Slow taper with knuckles and burls: grown, biomechanical, not a clean twig.
-        burl = 1 + 0.12 * math.sin(i * 1.7 + depth) + (0.4 if r.random() < 0.08 else 0.0)
-        bead = 0.6 * max(0.0, math.sin(i / bead_every * math.tau + bead_phase)) ** 4
-        taper = 0.45 if depth > 0 else 0.8          # the last twigs run out to points
-        rad = radius * (1 - taper * t) * (burl + bead)
+        # Continuous taper with subtle knuckles and burls.
+        burl = 1 + 0.035 * math.sin(i * 1.7 + depth) + (0.09 if r.random() < 0.08 else 0.0)
+        bead = 0.045 * max(0.0, math.sin(i / bead_every * math.tau + bead_phase)) ** 4
+        taper = 0.035 + 0.965 * (1 - t) ** 0.85
+        rad = radius * taper * (burl + bead)
         idx = sk.add(p, max(rad, 0.003), idx)
         chain.append((idx, t, d.copy()))
+    if broken: sk.broken.add(idx)
     if depth <= 0:
         return
     kids = 2 + (1 if r.random() < 0.65 else 0) + (1 if depth >= 2 and r.random() < 0.5 else 0)
@@ -68,8 +76,10 @@ def grow(sk, r, start, parent, d, length, radius, depth, droop, seg):
         idx0, t, dd = chain[min(len(chain) - 1, int(len(chain) * (0.35 + 0.55 * r.random())))]
         side = rand_unit(r); side = (side - dd * side.dot(dd)).normalized()
         cd = (dd * 0.55 + side * (0.8 + 0.4 * r.random()) + Vector((0, 0, 0.25))).normalized()
-        grow(sk, r, sk.pos[idx0], idx0, cd, length * (0.55 + 0.2 * r.random()),
-             sk.rad[idx0] * (0.8 if depth > 1 else 0.62), depth - 1, droop * 1.35 + 0.02, seg * 0.85)
+        # One leading fork and smaller lateral growth prevent equal antler-like branches.
+        dominance = 1.0 if k == 0 else rc.uniform(0.65, 0.88)
+        grow(sk, r, sk.pos[idx0], idx0, cd, length * (0.55 + 0.2 * r.random()) * dominance,
+             sk.rad[idx0] * (0.72 if depth > 1 else 0.58) * dominance, depth - 1, droop * 1.35 + 0.02, seg * 0.85)
 
 BAKE_SIZE = {"shrub": 512, "fallen": 512}
 def bake_bark(ob, name, kind, sk, children, sweep):
@@ -91,14 +101,15 @@ def bake_bark(ob, name, kind, sk, children, sweep):
     kd = KDTree(len(sk.pos))
     for i, p in enumerate(sk.pos): kd.insert(p, i)
     kd.balance()
-    for v in hi.data.vertices:
+    normals = [v.normal.copy() for v in hi.data.vertices]
+    for v, normal in zip(hi.data.vertices, normals):
         _, i, _ = kd.find(v.co)
         a = min(0.02, sk.rad[i] * 0.1)
         co = v.co
         # Coarse lumps, bark ridges stretched along the limb's length, fine pits.
         ridge = 1 - abs(noise.noise(Vector((co.x * 9, co.y * 9, co.z * 2.2))))
         pit = noise.noise(co * 42.0)
-        v.co += v.normal * (noise.noise(co * 13.0) * a + (ridge ** 3 - 0.4) * a * 0.6 + pit * a * 0.2)
+        v.co += normal * (noise.noise(co * 13.0) * a + (ridge ** 3 - 0.4) * a * 0.6 + pit * a * 0.2)
     hi.data.update()
     # Unwrap the game mesh, leaving the corner free.
     bpy.ops.object.select_all(action='DESELECT')
@@ -149,6 +160,8 @@ def build_tree(name, seed, kind):
         # Two heavy limbs that lean out and bow back to the ground: the grove's "conduit arches".
         grow(sk, r, base, root, Vector((0.1, 0, 1)).normalized(), 2.2, 0.36, 0, 0.0, 0.3)
         top = len(sk.pos) - 1
+        for j in range(1, top + 1): sk.rad[j] = max(sk.rad[j], 0.24 + 0.12 * (1 - j / top))
+        sk.broken.discard(top)
         for s in (-1, 1):
             grow(sk, r, sk.pos[top], top, Vector((0.9 * s, r.gauss(0, .2), 0.55)).normalized(), 5.8, 0.25, 3, 0.11, 0.3)
     elif kind == "leaning":
@@ -166,7 +179,7 @@ def build_tree(name, seed, kind):
     for i, parent in enumerate(sk.parent):
         if parent >= 0: children[parent].append(i)
     for i, kids in enumerate(children):
-        if not kids: sk.rad[i] = min(sk.rad[i], 0.003)
+        if not kids and i not in sk.broken: sk.rad[i] = min(sk.rad[i], 0.004)
         elif len(kids) > 1: sk.rad[i] = max(sk.rad[i], max(sk.rad[k] for k in kids) * 0.9)
     for _ in range(3):
         points = [p.copy() for p in sk.pos]
@@ -177,8 +190,8 @@ def build_tree(name, seed, kind):
 
     # Sweep connected branch paths. Blender's Skin modifier could leave open faces at
     # dense forks; smoothing/decimation then exposed conspicuous gaps in the trunk.
-    # Two sweeps: limbs at eight sides, thin twigs (the last few centimetres thick) at four,
-    # so the triangles go where they're seen. Joined after.
+    # Separate sweeps keep the triangle budget on the thick limbs, with enough longitudinal
+    # samples on the twigs to avoid straight spikes against the sky. Joined after.
     def sweep(cname, sides_res, keep, res_u=2):
         curve = bpy.data.curves.new(cname, 'CURVE')
         curve.dimensions = '3D'; curve.resolution_u = res_u
@@ -196,24 +209,61 @@ def build_tree(name, seed, kind):
         o = bpy.data.objects.new(cname, curve)
         bpy.context.scene.collection.objects.link(o)
         return o
-    # Thick limbs (seen up close, silhouettes against the sky) at twelve sides.
+    # Thick limbs at sixteen sides, middle branches at twelve, twigs at eight.
     THIN, THICK = 0.03, 0.11
-    ob = sweep(name, 2, lambda r: r >= THICK)
-    mid = sweep(name + "_mid", 1, lambda r: THIN <= r < THICK, 1)
-    twigs = sweep(name + "_twigs", 0, lambda r: r < THIN, 1)
+    ob = sweep(name, 3, lambda r: r >= THICK, 3)
+    mid = sweep(name + "_mid", 2, lambda r: THIN <= r < THICK, 3)
+    twigs = sweep(name + "_twigs", 1, lambda r: r < THIN, 2)
     parts = [o for o in (ob, mid, twigs) if o.data.splines]
+    has_twigs = bool(twigs.data.splines)
     for o in (mid, twigs):
         if o not in parts: bpy.data.objects.remove(o)
+    if not has_twigs: twigs = None
     if ob not in parts:  # (a tree with no thick limb)
         bpy.data.objects.remove(ob); ob = parts[0]
+    # Buried buttress roots flare out of the trunk and taper below the soil. A separate
+    # random stream preserves all of the authored branch positions and placement seeds.
+    if kind in ('tall', 'arch', 'leaning'):
+        rr = random.Random(seed + 3109)
+        roots = bpy.data.curves.new(name + '_roots', 'CURVE')
+        roots.dimensions = '3D'; roots.resolution_u = 5
+        roots.bevel_depth = 1; roots.bevel_resolution = 3; roots.use_fill_caps = True
+        for k in range(5):
+            a = k * math.tau / 5 + rr.uniform(-0.42, 0.42)
+            reach = rr.uniform(0.95, 1.55)
+            bend = rr.uniform(-0.35, 0.35)
+            spline = roots.splines.new('BEZIER'); spline.bezier_points.add(4)
+            points = []
+            for t, z in zip((0, 0.22, 0.48, 0.76, 1), (0.36, 0.10, -0.015, -0.12, -0.34)):
+                angle = a + bend * t
+                points.append(Vector((math.cos(angle) * (0.08 + t * reach),
+                                      math.sin(angle) * (0.08 + t * reach), z)))
+            for bp, co, rad in zip(spline.bezier_points, points, (0.19, 0.17, 0.105, 0.048, 0.006)):
+                bp.co = co; bp.radius = rad
+                bp.handle_left_type = bp.handle_right_type = 'AUTO'
+            # A lower fork follows the ground and disappears into sediment, rather than
+            # a regular star of identical raised roots around every trunk.
+            if k % 2 == 0:
+                fork = roots.splines.new('BEZIER'); fork.bezier_points.add(2)
+                side = a + rr.choice((-1, 1)) * 0.65
+                for bp, co, rad in zip(fork.bezier_points,
+                    (points[2], points[2] + Vector((math.cos(side) * 0.4, math.sin(side) * 0.4, -0.06)),
+                     points[2] + Vector((math.cos(side) * 0.8, math.sin(side) * 0.8, -0.3))), (0.073, 0.038, 0.004)):
+                    bp.co = co; bp.radius = rad
+                    bp.handle_left_type = bp.handle_right_type = 'AUTO'
+        roots_ob = bpy.data.objects.new(name + '_roots', roots)
+        bpy.context.scene.collection.objects.link(roots_ob); parts.append(roots_ob)
     for o in parts:
         bpy.ops.object.select_all(action='DESELECT')
         bpy.context.view_layer.objects.active = o
         o.select_set(True)
         bpy.ops.object.convert(target='MESH')
-    if len(parts) > 1:
+    # Union the substantial limbs before adding twigs. Voxel remeshing the whole tree
+    # would erase its fine tips; leaving intersecting swept tubes creates hard fork seams.
+    core = [o for o in parts if o is not twigs]
+    if len(core) > 1:
         bpy.ops.object.select_all(action='DESELECT')
-        for o in parts: o.select_set(True)
+        for o in core: o.select_set(True)
         bpy.context.view_layer.objects.active = ob
         bpy.ops.object.join()
     ob.name = name
@@ -223,18 +273,41 @@ def build_tree(name, seed, kind):
     # mineral crust a place to collect, as in the reference grove.
     for i, kids in enumerate(children):
         if len(kids) < 2: continue
-        verts = bmesh.ops.create_icosphere(bm, subdivisions=1, radius=sk.rad[i] * 1.06)["verts"]
+        verts = bmesh.ops.create_icosphere(bm, subdivisions=2, radius=sk.rad[i] * 1.06)["verts"]
         bmesh.ops.translate(bm, vec=sk.pos[i], verts=verts)
     bm.to_mesh(me); bm.free(); me.update()
+    if core:
+        bpy.context.view_layer.objects.active = ob
+        union = ob.modifiers.new('Grown branch junctions', 'REMESH')
+        union.mode = 'VOXEL'; union.voxel_size = 0.014 if kind != 'shrub' else 0.009
+        union.use_smooth_shade = True
+        bpy.ops.object.modifier_apply(modifier=union.name)
+        soften = ob.modifiers.new('Weathered fork transitions', 'SMOOTH')
+        soften.factor = 0.6; soften.iterations = 3
+        bpy.ops.object.modifier_apply(modifier=soften.name)
+    if twigs is not None and twigs is not ob:
+        bpy.ops.object.select_all(action='DESELECT')
+        ob.select_set(True); twigs.select_set(True); bpy.context.view_layer.objects.active = ob
+        bpy.ops.object.join()
+    me = ob.data
     # Small geometric bark relief, limited on thin twigs so their tips remain intact.
     from mathutils.kdtree import KDTree
     centers = KDTree(len(sk.pos))
     for i, p in enumerate(sk.pos): centers.insert(p, i)
     centers.balance()
-    for v in me.vertices:
+    # Coordinate edits invalidate Blender's normal cache. Snapshot it once instead of
+    # recalculating the entire dense remesh for each vertex as it is displaced.
+    normals = [v.normal.copy() for v in me.vertices]
+    for v, normal in zip(me.vertices, normals):
         _, i, _ = centers.find(v.co)
-        amount = min(0.014, sk.rad[i] * 0.08)
-        v.co += v.normal * noise.noise(v.co * 13.0) * amount
+        amount = min(0.012, sk.rad[i] * 0.08)
+        parent = sk.parent[i]
+        axis = (sk.pos[i] - sk.pos[parent]).normalized() if parent >= 0 else Vector((0, 0, 1))
+        radial = v.co - sk.pos[i]; radial -= axis * radial.dot(axis)
+        tangent = axis.cross(Vector((0.31, 0.73, 0.21))).normalized()
+        angle = math.atan2(radial.dot(axis.cross(tangent)), radial.dot(tangent))
+        flute = math.sin(angle * 5 + v.co.z * 0.6) * min(0.022, sk.rad[i] * 0.10)
+        v.co += normal * (noise.noise(v.co * 13.0) * amount + flute)
     me.update()
     # The limbs get their share of the budget now; what's attached after (thorns, beads, scales)
     # is built lean and kept whole, since decimating it would erase the small detail first.
@@ -253,10 +326,11 @@ def build_tree(name, seed, kind):
     bm = bmesh.new(); bm.from_mesh(me); bm.normal_update()
     surface = BVHTree.FromBMesh(bm)
     crust_candidates = [(v.co.copy(), v.normal.copy()) for v in bm.verts
-                        if v.co.z > 0.1 and noise.noise(v.co * 0.8) > -0.05]
+                        if v.co.z > 0.1 and sk.rad[centers.find(v.co)[1]] > 0.045
+                        and noise.noise(v.co * 0.8) > -0.05]
     rust_verts, crust_verts, attach_verts = set(), set(), set()
-    # Crowded, short thorns (the boards' limbs bristle), a few long ones among them.
-    n_thorn = {"tall": 360, "arch": 400, "leaning": 330, "shrub": 200, "fallen": 260}[kind]
+    # Sparse short thorns leave room for the mineral-encrusted bark and branch silhouette.
+    n_thorn = {"tall": 90, "arch": 110, "leaning": 80, "shrub": 65, "fallen": 60}[kind]
     for k in range(n_thorn):
         i = r.randrange(1, len(sk.pos))
         pa = sk.parent[i]
@@ -265,8 +339,9 @@ def build_tree(name, seed, kind):
         t = r.random(); p = a.lerp(b, t); rad = sk.rad[pa] * (1 - t) + sk.rad[i] * t
         axis = (b - a).normalized()
         out = rand_unit(r); out = (out - axis * out.dot(axis)).normalized()
-        nodule = r.random() < 0.1
-        size = (rad * (0.8 + 0.7 * r.random()) + 0.02) if r.random() < 0.12 else (rad * (0.35 + 0.45 * r.random()) + 0.012)
+        nodule = r.random() < 0.22
+        size = (rad * (0.55 + 0.4 * r.random()) + 0.018) if r.random() < 0.04 else (rad * (0.22 + 0.3 * r.random()) + 0.009)
+        size = min(0.065, size * 0.7)
         hit, normal, _, _ = surface.ray_cast(p, out, rad * 3 + 0.3)
         if hit is None: continue
         if nodule:
@@ -297,7 +372,7 @@ def build_tree(name, seed, kind):
             q = c + (tang * math.cos(a) + bit * math.sin(a)) * dist
             hit, nrm, _, _ = surface.ray_cast(q + normal * lr * 0.6, -normal, lr * 1.8)
             if hit is None: continue
-            size = lr * r.uniform(0.09, 0.2) * (1.25 - dist / spread * 0.5)
+            size = min(0.025, lr * r.uniform(0.06, 0.14)) * (1.25 - dist / spread * 0.5)
             verts = bmesh.ops.create_icosphere(bm, subdivisions=0, radius=size)["verts"]
             bmesh.ops.translate(bm, vec=hit + nrm * size * 0.45, verts=verts)
             crust_verts.update(verts); attach_verts.update(verts)
@@ -306,7 +381,8 @@ def build_tree(name, seed, kind):
     for k in range(60 if kind == 'shrub' else 150):
         if not crust_candidates: break
         p, normal = r.choice(crust_candidates)
-        size = r.uniform(0.025, 0.085)
+        lr = sk.rad[centers.find(p)[1]]
+        size = min(lr * 0.7, r.uniform(0.018, 0.065))
         verts = bmesh.ops.create_icosphere(bm, subdivisions=0, radius=1)["verts"]
         rot = Vector((0, 0, 1)).rotation_difference(normal).to_matrix().to_4x4()
         scale = Matrix.Diagonal((size, size * r.uniform(0.45, 0.8), size * 0.12, 1))
@@ -385,12 +461,12 @@ for ob in objs:
         col.data[i].color = (a, c[1], c[2], 1.0)
     me.color_attributes.remove(ao)
     me.color_attributes.active_color = me.color_attributes["Col"]
-    ob.location.x = 0
+for ob in objs: ob.location.x = 0
 bpy.data.objects.remove(ground)
 
 # Low-detail copies of the big forms for the far ring (giant silhouettes deep in the haze):
-# the same shape, baked colours carried through, at about a ninth of the triangles.
-FAR_TRIS = 2000
+# the same shape with baked colours, retaining enough facets for their enlarged silhouettes.
+FAR_TRIS = 4500
 for ob in [o for o in objs if o.name.startswith("tree_")]:
     far = ob.copy(); far.data = ob.data.copy()
     far.name = far.data.name = ob.name + "_far"
@@ -405,6 +481,8 @@ for ob in [o for o in objs if o.name.startswith("tree_")]:
     tris = sum(len(p.vertices) - 2 for p in far.data.polygons)
     dec = far.modifiers.new("dec", 'DECIMATE'); dec.ratio = min(1.0, FAR_TRIS / tris)
     bpy.ops.object.modifier_apply(modifier="dec")
+    far.data.validate(clean_customdata=False)
+    far.data.update()
     print(far.name, "tris", sum(len(p.vertices) - 2 for p in far.data.polygons))
     objs.append(far)
 

@@ -11,11 +11,13 @@ import { bloom } from 'three/examples/jsm/tsl/display/BloomNode.js';
 import { film } from 'three/examples/jsm/tsl/display/FilmNode.js';
 import { godrays } from 'three/examples/jsm/tsl/display/GodraysNode.js';
 import { bilateralBlur } from 'three/examples/jsm/tsl/display/BilateralBlurNode.js';
+import { ao } from 'three/examples/jsm/tsl/display/GTAONode.js';
 import { lut3D } from 'three/examples/jsm/tsl/display/Lut3DNode.js';
 import { radialBlur } from 'three/examples/jsm/tsl/display/radialBlur.js';
 import { Quality } from './quality';
 import { PALETTE } from './palette';
 import { buildGradeLut } from './grade';
+import { uDirectSun } from '../world/atmosphere';
 
 /**
  * Look chain: scene + light shafts -> depth of field -> warm bloom (cheap halation)
@@ -27,6 +29,28 @@ export function createPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, c
   pipeline.outputColorTransform = false; // tone map ourselves so the LUT works display-referred
   const scenePass = pass(scene, camera, { samples: q.tier === 'high' ? 4 : 0 });
   const sceneColor = scenePass.getTextureNode('output');
+  // Small-scale contact shading grounds feet, roots and loose masonry. Reconstruct normals
+  // from the existing depth buffer: no extra scene render or normal attachment. Low quality
+  // keeps the existing shadow maps and baked AO without the contact-shading passes.
+  const uContact = uniform(0.34);
+  let contact: ReturnType<typeof ao> | null = null;
+  let sceneLit: any = sceneColor;
+  if (q.tier === 'high') {
+    // GTAO gathers adjacent depth samples, which WebGPU cannot do on an MSAA texture.
+    // Copy depth to a single-sample R32F target, keeping depth precision and scene MSAA.
+    const contactDepth = rtt(vec4(scenePass.getTextureNode('depth').r), null, null,
+      { type: THREE.FloatType, format: THREE.RedFormat, depthBuffer: false });
+    contactDepth.value.minFilter = contactDepth.value.magFilter = THREE.NearestFilter;
+    // Three supports reconstructing normals when null; its current typings omit that case.
+    contact = ao(contactDepth, null as any, camera);
+    contact.resolutionScale = 0.5;
+    contact.radius.value = 0.22;
+    contact.thickness.value = 0.18;
+    contact.samples.value = 16;
+    const soft: any = bilateralBlur(contact.getTextureNode(), vec2(1), 2, 0.15);
+    const near = smoothstep(38.0, 12.0, scenePass.getViewZNode().negate());
+    sceneLit = vec4(vec3(sceneColor.rgb).mul(mix(float(1), soft.r, uContact.mul(near))), sceneColor.a);
+  }
   /**
    * What she perceives rather than sees (the grove's trail of small steps): its own layer,
    * over everything and not hidden by it, faint with her eyes open and clear behind her lids.
@@ -48,9 +72,9 @@ export function createPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, c
   const uSunFacing = uniform(0);
   const uShafts = uniform(1.0);
   /** Bokeh discs (cutscenes): brightness above which a point opens into a disc, and their gain. */
-  const uBokehLo = uniform(3.5), uBokehGain = uniform(1.8);
+  const uBokehLo = uniform(3.5), uBokehGain = uniform(0.85);
   /** Shaft shaping: the sun-core mask's range, the streaks' gain, the marched rays' floor. */
-  const uMaskLo = uniform(2.5), uMaskHi = uniform(6.0), uShaftGain = uniform(1.6), uRayLo = uniform(0.2);
+  const uMaskLo = uniform(2.5), uMaskHi = uniform(6.0), uShaftGain = uniform(1.15), uRayLo = uniform(0.2);
   const uGrade = uniform(1.0);
   /** Memory echo seen through closed lids: screen uv (x, y) and strength (z). */
   const uEcho = uniform(new THREE.Vector3(0.5, 0.5, 0));
@@ -155,9 +179,9 @@ export function createPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, c
    * most of a millisecond even at zero). Each frame renders whichever is needed (render()).
    */
   const chain = (withDof: boolean) => {
-    let c: any = sceneColor;
+    let c: any = sceneLit;
     if (withDof) {
-      c = dof(sceneColor, scenePass.getViewZNode(), uFocus, uFocusRange, uBokeh);
+      c = dof(sceneLit, scenePass.getViewZNode(), uFocus, uFocusRange, uBokeh);
       // Bokeh: out of focus, the brightest points (sun glitter on water and wet ground, the
       // port's glow) open into soft even discs, as through the films' lenses. The blur above
       // only smears them. Bright, defocused points at quarter resolution, gathered over a disc
@@ -187,8 +211,11 @@ export function createPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, c
     // Beams show against what's near and darker, not added onto the bright sky as a veil; the
     // blur's own smooth falloff is pressed down so the gaps between beams stay dark.
     const beams = max(float(shafts.r).sub(float(shaftsLow.r).mul(0.85)), 0.0).mul(3.0).add(float(shafts.r).mul(0.12));
-    const overNear = float(1).sub(smoothstep(30.0, 110.0, viewZ.negate()).mul(0.75));
-    c = vec4(vec3(c.rgb).add(color(PALETTE.sun).mul(beams.mul(uShafts).mul(uSunFacing).mul(uShaftGain).mul(overNear))), 1.0);
+    // Scattering accumulates through air. Applying the full shaft at the lens washed the
+    // face, hair and ceramic into the same beige, even though their fog starts farther away.
+    const airPath = smoothstep(1.5, 14.0, viewZ.negate());
+    const overNear = airPath.mul(float(1).sub(smoothstep(30.0, 110.0, viewZ.negate()).mul(0.75)));
+    c = vec4(vec3(c.rgb).add(color(PALETTE.sun).mul(beams.mul(uShafts).mul(uSunFacing).mul(uShaftGain).mul(uDirectSun).mul(overNear))), 1.0);
 
     // Painterly distance: far off, the picture flattens into strokes (a small Kuwahara filter: of
     // four overlapping sectors round each pixel, take the mean of the calmest), so the distance
@@ -371,7 +398,7 @@ export function createPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, c
   return {
     pipeline,
     memoryScene,
-    uFocus, uFocusRange, uBokeh, uGrain, uVignette, uEyesClosed, uRays, uGrade, rays, uShafts, uEcho, uWarm, uAfter, uDrain, uFx, uSat, uTint,
+    uFocus, uFocusRange, uBokeh, uGrain, uVignette, uEyesClosed, uRays, uGrade, rays, uShafts, uEcho, uWarm, uAfter, uDrain, uFx, uSat, uTint, uContact, contact,
     uFrag, uPaint, uFlood, uFloodK, uExposure, uContrast, uSatBase, uLift, uMaskLo, uMaskHi, uShaftGain, uRayLo, uBokehLo, uBokehGain,
     /**
      * Each frame: where she is, the camera's matrices for the fragments, and the known map (the

@@ -5,7 +5,7 @@ For runtime motion checks and matched artwork views, use the [movement and refer
 ## Automated rig (current)
 
 ```bash
-blender/rig_character.sh 3D-assets/afterimage-quads.glb game/public/models/woman.glb \
+LAYERED_ARMOR=1 blender/rig_character.sh 3D-assets/afterimage-quads.glb game/public/models/woman.glb \
   3D-assets/afterimage-triangles-2m.glb 3D-assets/afterimage-head-triangles.glb
 ```
 
@@ -27,7 +27,8 @@ The third argument is optional. If you pass the 2M high-poly export, its surface
    - `add_twist.py`: a `<Side>ForeArmTwist` bone from mid-forearm to the wrist takes the distal forearm skin on a smooth ramp; the game turns it by 60% of the hand's roll about the forearm (swing-twist split), so wrist turns don't candy-wrap.
    - `separate_fingers.py`: the scan's index–pinky were fused by webbing to mid-finger. Their bones are rebuilt with anatomical proportions (knuckles evenly spaced, slight fan, natural rest curl; tip detection on the fused mesh had left them crooked and short), the fused geometry past the knuckles is removed and the palm capped, and each finger is regenerated as a tapered oval tube with knuckle bulges and a rounded tip, sunk into the palm like a ceramic joint. Texture carries over by casting rays from the old finger's axis onto the scan's surface (per face, so faces never straddle two atlas islands); each finger is weighted to its own bones. The thumb keeps its original geometry.
    - Fingers are posed in the game, not baked: `src/player/hands.ts` measures each finger's curl axis at load time (finger direction × palm normal) and curls the three joints in character space, so it works whatever the bone rolls are.
-5. `export_game.py`: exports a GLB with 2K WebP textures, extras and morph targets (without morph normals, which shaded the lids wrong), then compresses it with meshopt.
+5. With `LAYERED_ARMOR=1`, `layered_armor.py` fits overlapping ceramic plates to the finished body's surface and transfers its skin weights. It saves a separate `woman_armored.blend`, preserving the rigged source. The child wrapper explicitly disables this stage. See the [layered armor study](layered-armor.md) for geometry, validation and a faster rebuild command.
+6. `export_game.py`: exports a GLB with 2K WebP textures, extras and morph targets (without morph normals, which shaded the lids wrong), then compresses it with meshopt.
 
 To polish the face further, edit the texture or the mesh of `3D-assets/afterimage-head-triangles.glb` and re-run the script. The joints and the head fit are re-computed on every run.
 

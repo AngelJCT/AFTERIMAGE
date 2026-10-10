@@ -168,6 +168,19 @@ for j in range(N):
 
 arcade = conduits.mesh()
 
+# Small structural collars bind the grown conduits at the piers. The outer radius stays
+# inside the existing 0.55 m blocker; the branching silhouette above remains open.
+bm = bmesh.new(); bm.from_mesh(arcade.data)
+for i in range(N + 1):
+    for z in (1.2, Z_SPRING - 0.65):
+        rings = []
+        for radius, zz in ((0.44, z - 0.075), (0.44, z + 0.075), (0.34, z + 0.075), (0.34, z - 0.075)):
+            rings.append([bm.verts.new((pier_x(i) + radius * math.cos(k * math.tau / 16),
+                                       radius * math.sin(k * math.tau / 16), zz)) for k in range(16)])
+        for a, b in zip(rings, rings[1:] + rings[:1]):
+            for k in range(16): bm.faces.new((a[k], a[(k + 1) % 16], b[(k + 1) % 16], b[k]))
+bm.to_mesh(arcade.data); bm.free(); arcade.data.update()
+
 # Deck: bone paving along the apexes, continuing left past the arcade. Each piece is a base slab
 # carrying worn pavers, and its own object, named by position along the arcade (deck_00 is the far
 # left end) so the route can give way piece by piece (the search). The pavers' tops sit at the
@@ -248,6 +261,19 @@ def deck_piece(x0, x1, name):
     bm = bmesh.new()
     base_slab(bm, x0, x1, TOP - PAVE, DECK_Z - 0.21)
     pave(bm, x0, x1)
+    # A recessed lower course gives the deck thickness and a shadow line. Segments break
+    # at the same places as the playable slabs; no deck top or route boundary is moved.
+    for side in (-1, 1):
+        x = x0 + 0.04
+        while x < x1 - 0.12:
+            end = min(x1 - 0.04, x + 1.35)
+            vs = bmesh.ops.create_cube(bm, size=1)["verts"]
+            for v in vs:
+                v.co = Vector((x + (v.co.x + 0.5) * (end - x),
+                               side * 1.28 + v.co.y * 0.14, DECK_Z - 0.14 + v.co.z * 0.15))
+            edges = list({e for v in vs for e in v.link_edges})
+            bmesh.ops.bevel(bm, geom=edges, offset=0.016, segments=2, affect='EDGES')
+            x = end + 0.035
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me); bm.free()
     ob = bpy.data.objects.new(name, me)

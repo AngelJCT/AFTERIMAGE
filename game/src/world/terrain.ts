@@ -2,9 +2,9 @@ import * as THREE from 'three/webgpu';
 import {
   Fn, color, float, mix, smoothstep, positionWorld, vec2, vec3, mx_fractal_noise_float, mx_worley_noise_vec2,
   positionView, normalView, uniform, floor, fract, hash, normalize, reflect, cameraPosition, dot, max, length,
-  normalWorld, time,
+  normalWorld,
 } from 'three/tsl';
-import { SUN_DIR } from './atmosphere';
+import { SUN_DIR, uDirectSun } from './atmosphere';
 
 /**
  * Bump from a procedural height (metres) with screen-space derivatives
@@ -147,11 +147,18 @@ export function createTerrain(segments: number) {
   const p = positionWorld;
   const large = mx_fractal_noise_float(vec3(p.x.mul(0.3), p.z.mul(0.3), 0), 3, 2.0, 0.5).mul(0.5).add(0.5);
   const fine = mx_fractal_noise_float(vec3(p.x.mul(4.0), p.z.mul(4.0), 1), 2, 2.0, 0.5).mul(0.5).add(0.5);
+  // Desiccated clay occurs in islands. Silty runnels and gravel interrupt the cells rather
+  // than covering the entire grove in the same cracked plate pattern.
+  const clay = smoothstep(0.42, 0.56, large.add(fine.sub(0.5).mul(0.2)));
+  const sediment = mx_fractal_noise_float(vec3(p.x.mul(0.65), p.z.mul(1.6), 12), 3, 2, 0.5).mul(0.5).add(0.5);
+  const detail = smoothstep(35.0, 6.0, length(p.sub(cameraPosition)));
   // Domain-warped cells so the dried mud cracks don't read as tiles.
   const warp = vec2(fine.sub(0.5), large.sub(0.5)).mul(0.35);
   const cells = mx_worley_noise_vec2(vec2(p.x.mul(2.3), p.z.mul(2.3)).add(warp));
   const crackWidth = fine.mul(0.05).add(0.012);
   const crackEdge = smoothstep(0.0, crackWidth, cells.y.sub(cells.x));
+  const crackAA = cells.y.sub(cells.x).fwidth().max(0.001);
+  const visibleCrack = smoothstep(crackWidth.add(crackAA), crackWidth.sub(crackAA).max(0), cells.y.sub(cells.x));
   // A finer network inside the plates (thinner, shallower), and rare deep fissures across them.
   const small = mx_worley_noise_vec2(vec2(p.x.mul(7.5), p.z.mul(7.5)).add(warp.mul(2.2)));
   const smallEdge = smoothstep(0.0, 0.035, small.y.sub(small.x));
@@ -181,22 +188,25 @@ export function createTerrain(segments: number) {
   const gap = cells.y.sub(cells.x);
   const lip = smoothstep(crackWidth, crackWidth.mul(4), gap).oneMinus().mul(crackEdge);
   mat.colorNode = Fn(() => {
-    // Pale bone mud, as in the films; the darker sediment only in patches.
-    const base = mix(color(PALETTE.sediment), color(PALETTE.bone).mul(1.18), large.mul(0.7).add(fine.mul(0.3)).mul(0.35).add(0.65)).toVar();
+    // Neutral mineral silt takes its warmth from the light; damp soil has a cooler grey
+    // undertone. Different-sized deposits remain legible beneath the film grade.
+    const silt = mix(color(0x7f8179), color(0xc0beb3), smoothstep(0.35, 0.65, sediment));
+    const base = mix(silt, color(0xcec9bc), clay.mul(0.68)).toVar();
     base.assign(mix(base, color(PALETTE.rust).mul(1.4), stain.mul(0.28)));
     base.assign(mix(base, color(PALETTE.bone).mul(1.08), dust.mul(0.25)));
     // Curled plate edges catch the light.
-    base.assign(base.mul(float(1).add(lip.mul(0.14).mul(dry))));
-    const cracked = mix(base.mul(0.55), base, mix(float(1), crackEdge, dry.mul(0.85)))
-      .mul(mix(float(1), mix(float(0.72), float(1), smallEdge), dry.mul(0.7)))
-      .mul(float(1).sub(fissure.mul(0.6).mul(dry)))
-      .mul(float(1).sub(speck.mul(0.35)));
-    const wet = cracked.mul(mix(float(0.5), float(1.0), dry)).mul(float(1).sub(damp.mul(0.12)))
-      .mul(float(1).sub(wetFilm.mul(0.4)));
-    return mix(wet, color(0xe9e4d6), salt.mul(0.55).mul(float(1).sub(wetFilm)));
+    base.assign(base.mul(float(1).add(lip.mul(0.035).mul(dry).mul(clay))));
+    const cracked = base.mul(float(1).sub(visibleCrack.mul(dry).mul(clay).mul(0.45)))
+      .mul(mix(float(1), mix(float(0.84), float(1), smallEdge), dry.mul(clay).mul(detail).mul(0.45)))
+      .mul(float(1).sub(fissure.mul(0.30).mul(dry).mul(clay)))
+      .mul(float(1).sub(speck.mul(0.16)));
+    const wet = cracked.mul(mix(float(0.49), float(1.0), dry)).mul(float(1).sub(damp.mul(0.15)))
+      .mul(float(1).sub(wetFilm.mul(0.23)));
+    return mix(wet, color(0xe1dfd3), salt.mul(0.40).mul(float(1).sub(wetFilm)));
   })();
-  mat.roughnessNode = mix(float(0.22), float(0.93), dry).sub(fine.mul(0.08)).add(salt.mul(0.05))
-    .mul(float(1).sub(wetFilm.mul(0.82)));
+  mat.roughnessNode = mix(mix(float(0.60), float(0.93), dry).add(salt.mul(0.04)),
+    float(0.48).add(fine.mul(0.10)), wetFilm.mul(0.72));
+  mat.envMapIntensity = 0.45;
   // Glitter on the wet ground: tiny facets of the water skin that catch the sun (as on the
   // water itself), only where it's wet and only looking toward the light.
   const uSun = uniform(SUN_DIR);
@@ -204,7 +214,7 @@ export function createTerrain(segments: number) {
     const q = p.xz.mul(26.0);
     const cell = floor(q), f = fract(q);
     const id = cell.x.mul(157.3).add(cell.y.mul(271.9));
-    const k = id.add(floor(time.mul(hash(id).mul(1.5).add(0.6)).add(hash(id.add(3.0)).mul(9.0))).mul(41.7));
+    const k = id; // The soil's facets stay fixed as the camera moves.
     const n = normalize(normalWorld.add(vec3(hash(k).sub(0.5), 0, hash(k.add(1.7)).sub(0.5)).mul(0.5)));
     const v = normalize(p.sub(cameraPosition));
     const a = max(dot(reflect(v, n), uSun), 0.0);
@@ -213,12 +223,14 @@ export function createTerrain(segments: number) {
     const near = smoothstep(26.0, 8.0, length(p.sub(cameraPosition)));
     return smoothstep(0.988, 0.999, a).mul(point).mul(max(wetFilm, float(1).sub(dry).mul(0.6))).mul(near).mul(smoothstep(0.0, 0.2, uSun.y));
   })();
-  mat.emissiveNode = color(0xfff1d6).mul(glitter.mul(7.0));
-  // Relief: cracks sink ~1 cm, plate edges curl up (dried mud), fine grit on top; the fine
-  // network and the fissures cut in too.
+  mat.emissiveNode = color(0xfff1d6).mul(glitter.mul(1.4)).mul(uDirectSun);
+  // Millimetre-scale relief: shallow clay cracks and curled edges, with rare deeper fissures.
   const grit = mx_fractal_noise_float(vec3(p.x.mul(22), p.z.mul(22), 2), 2, 2.0, 0.5);
-  const relief = crackEdge.mul(0.005).add(lip.mul(0.0015)).add(fine.mul(0.003)).add(grit.mul(0.0006))
-    .add(smallEdge.mul(0.0015)).sub(fissure.mul(0.012)).add(salt.mul(0.0012)).mul(dry);
+  // Keep the differentiated height independent of screen derivatives; filtered colour
+  // cracks above must not feed bumpNormal (nested derivatives fail on WebGL).
+  const relief = crackEdge.mul(0.0036).add(lip.mul(0.0008)).add(smallEdge.mul(0.00065).mul(detail))
+    .sub(fissure.mul(0.005)).mul(clay).mul(dry)
+    .add(fine.mul(0.0013)).add(grit.mul(0.00045).mul(detail)).add(salt.mul(0.0008));
   mat.normalNode = bumpNormal(relief);
   mat.metalnessNode = float(0);
 
@@ -228,16 +240,21 @@ export function createTerrain(segments: number) {
   return mesh;
 }
 
-/** Water depth map (0..0.5m) for the water shader's shoreline fade. */
-export function createDepthTexture(res = 256) {
+/** R: normalized depth over 0.5 m. G: signed ground height, encoded as metres + 0.5.
+ * Signed height preserves the waterline through bilinear filtering at dry/wet boundaries.
+ */
+export function createDepthTexture(res = 512) {
   const data = new Uint8Array(res * res * 4);
   for (let j = 0; j < res; j++) {
     for (let i = 0; i < res; i++) {
-      const x = (i / (res - 1) - 0.5) * TERRAIN_SIZE;
-      const z = (j / (res - 1) - 0.5) * TERRAIN_SIZE;
-      const d = Math.min(1, Math.max(0, (WATER_LEVEL - heightAt(x, z)) / 0.5));
+      // Sample texel centres so the shader's world / size + 0.5 UVs interpolate in place.
+      const x = ((i + 0.5) / res - 0.5) * TERRAIN_SIZE;
+      const z = ((j + 0.5) / res - 0.5) * TERRAIN_SIZE;
+      const h = heightAt(x, z) - WATER_LEVEL;
+      const d = Math.min(1, Math.max(0, -h / 0.5));
       const k = (j * res + i) * 4;
-      data[k] = data[k + 1] = data[k + 2] = Math.round(d * 255);
+      data[k] = data[k + 2] = Math.round(d * 255);
+      data[k + 1] = Math.round(Math.min(1, Math.max(0, h + 0.5)) * 255);
       data[k + 3] = 255;
     }
   }

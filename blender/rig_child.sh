@@ -11,5 +11,5 @@ mkdir -p blender/work/child
 echo "0/5 decimate scan"
 /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup -P blender/scripts/decimate_scan.py -- \
   "$PWD/$BODY" "$PWD/blender/work/child/child_base.glb" 60000 | grep DECIMATE_OK
-WORK=blender/work/child SKIP_FINGERS=1 HAND_SKIN=1 HAND_MODE=anatomic EYE_IRIS=dark EYE_BAND=1.455,1.488 \
+LAYERED_ARMOR=0 WORK=blender/work/child SKIP_FINGERS=1 HAND_SKIN=1 HAND_MODE=anatomic EYE_IRIS=dark EYE_BAND=1.455,1.488 \
   blender/rig_character.sh blender/work/child/child_base.glb game/public/models/child.glb "$BODY" "$HEAD"

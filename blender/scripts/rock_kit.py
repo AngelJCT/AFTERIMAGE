@@ -1,8 +1,8 @@
 """Floor kit for the grove: pebbles, fractured chunks, a slab, salt crusts, boulders and fallen thorn twigs.
 
-Each piece starts as an icosphere, is squashed, cut by random fracture planes (flat broken
-faces like the film's mineral chunks), roughened with noise, seated on a flat base and
-decimated to a budget. Vertex colours carry masks for the game material:
+Mineral beds use closed, bevelled fracture faces, offset layers and split upper slabs.
+Pebbles retain their weathered icosphere base; rubble combines a low mound with larger
+fractured plates and small fragments. Vertex colours carry masks for the game material:
 R = baked ambient occlusion, G = pale mineral crust (up-facing), B = dark water stain (low).
 
 Usage: Blender -b --factory-startup -P rock_kit.py -- out.glb
@@ -37,7 +37,116 @@ def rand_unit(r):
         if 0.1 < v.length <= 1: return v.normalized()
 
 
+def fractured_plate(bm, r, half_x, half_y, height, center, yaw=0.0, split=False):
+    """A chipped mineral bed with broad fracture faces and a broken, bevelled rim.
+
+    Shared outlines at both heights keep each plate closed. Unequal corner cuts and
+    a sloping bedding plane avoid circular coins and perfect stacked boxes.
+    """
+    count = r.randint(7, 10)
+    outline = []
+    for i in range(count):
+        a = math.tau * (i + r.uniform(-0.18, 0.18)) / count
+        reach = r.uniform(0.82, 1.06)
+        outline.append(Vector((math.cos(a) * half_x * reach, math.sin(a) * half_y * reach, 0)))
+    slope = Vector((r.uniform(-0.035, 0.035), r.uniform(-0.035, 0.035), 0))
+    lean = Vector((r.uniform(-0.05, 0.05) * half_x, r.uniform(-0.05, 0.05) * half_y, 0))
+    outlines = [outline]
+    if split:
+        # Clip both sides of a narrow fracture. Unlike a dark shader line this reveals
+        # the underlying bed and leaves genuinely separate, closed stone pieces.
+        axis = Vector((r.uniform(-0.7, 0.7), 1, 0)).normalized()
+        gap = min(half_x, half_y) * 0.025
+        outlines = []
+        for sign in (-1, 1):
+            poly = []
+            for i, p in enumerate(outline):
+                q = outline[(i + 1) % len(outline)]
+                dp, dq = sign * p.dot(axis) - gap, sign * q.dot(axis) - gap
+                if dp >= 0: poly.append(p)
+                if (dp >= 0) != (dq >= 0): poly.append(p.lerp(q, dp / (dp - dq)))
+            if len(poly) >= 3: outlines.append(poly)
+    for outline in outlines:
+        if split:
+            # Break the long fracture edge into a small zigzag shared by both halves.
+            ragged = []
+            for i, p in enumerate(outline):
+                q = outline[(i + 1) % len(outline)]
+                ragged.append(p)
+                if abs(abs(p.dot(axis)) - gap) < 1e-5 and abs(abs(q.dot(axis)) - gap) < 1e-5:
+                    tangent = Vector((-axis.y, axis.x, 0))
+                    for t in (0.25, 0.5, 0.75):
+                        v = p.lerp(q, t)
+                        v += axis * math.sin(v.dot(tangent) / max(half_x, half_y) * 9) * gap * 0.8
+                        ragged.append(v)
+            outline = ragged
+        count = len(outline)
+        rings = []
+        top_scale = r.uniform(0.88, 1.0)
+        for z, scale in ((0, 1), (height, top_scale)):
+            ring = []
+            for p in outline:
+                q = p * scale + lean * (z / height)
+                q.z = z + slope.dot(p)
+                q.rotate(Matrix.Rotation(yaw, 3, 'Z'))
+                ring.append(bm.verts.new(q + center))
+            rings.append(ring)
+        faces = [bm.faces.new(tuple(reversed(rings[0]))), bm.faces.new(rings[1])]
+        for i in range(count):
+            j = (i + 1) % count
+            faces.append(bm.faces.new((rings[0][i], rings[0][j], rings[1][j], rings[1][i])))
+        edges = list({e for f in faces for e in f.edges})
+        bmesh.ops.bevel(bm, geom=edges, offset=min(height * 0.16, min(half_x, half_y) * 0.035), segments=2)
+
+
+def build_layered_rock(name, seed, size, squash, budget):
+    r = random.Random(seed)
+    me = bpy.data.meshes.new(name); ob = bpy.data.objects.new(name, me)
+    bpy.context.collection.objects.link(ob)
+    bm = bmesh.new()
+    sx, sy, sz = (size * v / max(squash) for v in squash)
+    flat = name.startswith('crust') or name == 'slab'
+    tiers = 3 if name.startswith('boulder') else (3 if name == 'crust_b' else 2)
+    height = sz * (1.45 if flat else 1.55)
+    # Beds belong to the same formation; fractures open and offset successive layers.
+    offset = Vector((0, 0, -height * 0.10))
+    for layer in range(tiers):
+        t = layer / tiers
+        span = 1 - t * (0.22 if flat else 0.38)
+        layer_h = height / tiers * r.uniform(0.91, 1.07)
+        fractured_plate(bm, r, sx * span, sy * span, layer_h,
+                        offset.copy(), r.uniform(-0.11, 0.11), split=layer == tiers - 1)
+        offset += Vector((r.uniform(-0.08, 0.08) * sx, r.uniform(-0.08, 0.08) * sy, layer_h * 0.96))
+    # A few fragments at the broken foot, partially buried. Keep them inside the kit's
+    # existing footprint so boulder collisions and the pool's open centre remain valid.
+    for j in range(4 if flat else 3):
+        a = r.random() * math.tau
+        fractured_plate(bm, r, sx * r.uniform(0.12, 0.24), sy * r.uniform(0.10, 0.23),
+                        height * r.uniform(0.12, 0.24),
+                        Vector((math.cos(a) * sx * 0.72, math.sin(a) * sy * 0.72, -height * 0.05)), a)
+    bmesh.ops.triangulate(bm, faces=list(bm.faces))
+    bmesh.ops.subdivide_edges(bm, edges=list(bm.edges), cuts=1, use_grid_fill=True)
+    bm.normal_update()
+    off = Vector((seed * 0.7, seed * 1.3, seed))
+    normals = {v: v.normal.copy() for v in bm.verts}
+    for v, normal in normals.items():
+        v.co += normal * (noise.noise(v.co * (7 / size) + off) * min(0.036, size * 0.055)
+                         + noise.noise(v.co * (24 / size) - off) * min(0.007, size * 0.012))
+    bmesh.ops.triangulate(bm, faces=list(bm.faces))
+    bm.to_mesh(me); bm.free(); me.update()
+    tris = sum(len(p.vertices) - 2 for p in me.polygons)
+    if tris > budget:
+        bpy.context.view_layer.objects.active = ob
+        dec = ob.modifiers.new("Fracture budget", 'DECIMATE'); dec.ratio = budget / tris
+        bpy.ops.object.modifier_apply(modifier=dec.name)
+        me = ob.data
+    finish_cluster(name, me, ob, 0.6, 0.58, off)
+    return ob
+
+
 def build_rock(name, seed, size, squash, cuts, depth, rough, terrace, budget):
+    if name != 'pebble_a':
+        return build_layered_rock(name, seed, size, squash, budget)
     r = random.Random(seed)
     me = bpy.data.meshes.new(name)
     ob = bpy.data.objects.new(name, me)
@@ -92,6 +201,7 @@ def build_rock(name, seed, size, squash, cuts, depth, rough, terrace, budget):
         dec = ob.modifiers.new("dec", 'DECIMATE'); dec.ratio = budget / tris
         bpy.context.view_layer.objects.active = ob
         bpy.ops.object.modifier_apply(modifier="dec")
+        me = ob.data
     bpy.ops.object.select_all(action='DESELECT'); ob.select_set(True)
     bpy.context.view_layer.objects.active = ob
     bpy.ops.object.shade_smooth_by_angle(angle=math.radians(38))
@@ -159,6 +269,7 @@ def build_twig(name, seed, length, forks, budget):
     if tris > budget:
         dec = ob.modifiers.new("dec", 'DECIMATE'); dec.ratio = budget / tris
         bpy.ops.object.modifier_apply(modifier="dec")
+        me = ob.data
     for p in me.polygons: p.use_smooth = True
     col = me.color_attributes.new("Col", 'BYTE_COLOR', 'POINT')
     me.color_attributes.active_color = col
@@ -232,6 +343,13 @@ def build_mound(name, seed, radius, height, n, budget):
         verts = chunk_verts(bm, r, size, subdiv=1 if size > 0.08 else 0)
         rot = rand_unit(r).rotation_difference(Vector((0, 0, 1))).to_matrix().to_4x4()
         bmesh.ops.transform(bm, matrix=Matrix.Translation(hit - nrm * size * 0.35) @ rot, verts=verts)
+    for k in range(7):
+        a = r.random() * math.tau; d = radius * r.uniform(0.15, 0.68)
+        hit, _, _, _ = surf.ray_cast(Vector((math.cos(a) * d, math.sin(a) * d, height * 3)), Vector((0, 0, -1)), height * 6)
+        if hit is None: continue
+        span = radius * r.uniform(0.16, 0.30)
+        fractured_plate(bm, r, span, span * r.uniform(0.55, 0.85), span * 0.45,
+                        hit - Vector((0, 0, span * 0.28)), r.random() * math.tau)
     bm.to_mesh(me); bm.free()
     # (Built lean and never decimated: collapsing loose chunks smears them into shards.)
     return finish_cluster(name, me, ob, 0.25, 0.75, off)
@@ -312,7 +430,7 @@ for ob in objs:
         col.data[i].color = (a, c[1], c[2], 1.0)
     me.color_attributes.remove(ao)
     me.color_attributes.active_color = me.color_attributes["Col"]
-    ob.location.x = 0
+for ob in objs: ob.location.x = 0
 bpy.data.objects.remove(ground)
 
 bpy.ops.object.select_all(action='DESELECT')

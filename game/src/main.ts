@@ -11,6 +11,7 @@ import { Water } from './world/water';
 import { createGrove, createRubble, groveSpots } from './world/grove';
 import { loadGroveKit } from './world/groveKit';
 import { loadRockKit } from './world/rockKit';
+import { createShoreline } from './world/shoreline';
 import { loadLandmarks } from './world/landmarks';
 import { loadGate, type Gate } from './world/gate';
 import { Guide, type GuideMode } from './world/guide';
@@ -119,9 +120,9 @@ export class Game {
     this.ui = new UI(this.clock, this.q.touch);
 
     this.atmos = createAtmosphere(this.scene, this.q.shadows);
-    this.scene.add(createTerrain(this.q.tier === 'high' ? 220 : 130));
+    this.scene.add(createTerrain(this.q.tier === 'high' ? 320 : 180));
     this.scene.add(createDust(this.q.dust));
-    this.water = new Water(this.scene, createDepthTexture(), this.q.reflectionScale, SUN_DIR);
+    this.water = new Water(this.scene, createDepthTexture(this.q.tier === 'high' ? 1024 : 512), this.q.reflectionScale, SUN_DIR);
 
     this.post = createPost(this.renderer, this.scene, this.cam.camera, this.q, this.atmos.sun);
 
@@ -269,10 +270,11 @@ export class Game {
       this.scene.add(createClouds(cloudBanks(WORLD_CENTRE, decks, this.q.tier === 'high' ? 22 : 12), this.atmos));
     }
     this.scene.add(createReeds(this.q.tier === 'high' ? 900 : 350));
+    this.scene.add(createShoreline(this.q.tier === 'high'));
     // Every instanced kit spans the grove as one mesh: split them into ground cells, so the view,
     // the sun's shadow box and the reflection each draw only the cells they can see. (The far
     // silhouettes stay whole: they're always in view, and the inverted world copies them.)
-    for (const name of ['grove', 'thorns', 'rocks', 'debris', 'reeds']) {
+    for (const name of ['grove', 'thorns', 'rocks', 'debris', 'reeds', 'shoreline']) {
       const o = this.scene.getObjectByName(name);
       if (o) chunkInstances(o, 28, (m) => m.name.endsWith('_far'));
     }
@@ -315,7 +317,7 @@ export class Game {
     // Out of the water's reflection: small clutter, and what hangs far up in the sky (one
     // reflection draw each saved; on low quality the thorns too).
     const NO_REFLECT = 7;
-    const skip = ['debris', 'rocks', 'flakes', 'invertedWorld', 'dust', 'chapter-title', 'memoryPanes', ...(this.q.tier === 'low' ? ['thorns'] : [])];
+    const skip = ['debris', 'rocks', 'shoreline', 'flakes', 'invertedWorld', 'dust', 'chapter-title', 'memoryPanes', ...(this.q.tier === 'low' ? ['thorns'] : [])];
     this.water.excludeFromReflection(this.cam.camera, this.atmos.sun.shadow.camera, NO_REFLECT,
       skip.map((n) => this.scene.getObjectByName(n)).filter((o): o is THREE.Object3D => !!o));
     this.player.onFootstep = (x, z, speed) => {
@@ -371,8 +373,11 @@ export class Game {
     const f = cam.getWorldDirection(_fl.f), r = _fl.r.crossVectors(f, _fl.up).normalize();
     uKeyDir.value.copy(f).negate().addScaledVector(_fl.up, 0.55).addScaledVector(r, 0.4).normalize();
     const sun = this.atmos.sun, strength = Math.min(1.2, sun.intensity / 4.5);
-    uKeyCol.value.setRGB(1, 0.95, 0.88).lerp(sun.color, 0.35);
-    uCineKey.value = cine * 1.1;
+    uKeyCol.value.setRGB(0.90, 0.96, 1).lerp(sun.color, 0.35);
+    const bounce = Math.max(strength, Math.min(1, this.atmos.hemi.intensity * 0.7));
+    uCineKey.value = (0.06 + cine * 1.04) * (0.35 + 0.65 * bounce);
+    // The gate's open-roof bounce follows the sky instead of staying bright at night.
+    if (this.gate) this.gate.roof.intensity = 44 * (0.3 + 0.7 * Math.min(1, strength));
     uRimDir.value.copy(SUN_DIR);
     uRimCol.value.copy(sun.color).multiplyScalar(strength);
     uCineRim.value = 0.25 + 0.95 * cine;
@@ -534,7 +539,12 @@ export class Game {
             const src8 = px as Uint8Array;
             const stride = src8.length >= w * h * 4 + 1 ? Math.ceil((w * 4) / 256) * 256 : w * 4;
             const img = new ImageData(w, h);
-            for (let y = 0; y < h; y++) img.data.set(src8.subarray(y * stride, y * stride + w * 4), y * w * 4);
+            // WebGL reads from the bottom row; canvas ImageData and WebGPU start at the top.
+            const flipRows = this.renderer.coordinateSystem === THREE.WebGLCoordinateSystem;
+            for (let y = 0; y < h; y++) {
+              const offset = (flipRows ? h - 1 - y : y) * stride;
+              img.data.set(src8.subarray(offset, offset + w * 4), y * w * 4);
+            }
             const c = document.createElement('canvas');
             c.width = w; c.height = h;
             const ctx = c.getContext('2d')!;

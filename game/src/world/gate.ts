@@ -6,7 +6,6 @@ import {
   attribute, clamp, color, float, mix, smoothstep, positionWorld, vec3, mx_fractal_noise_float, mx_worley_noise_float, sin,
 } from 'three/tsl';
 import { footprint } from './groveKit';
-import { PALETTE } from '../core/palette';
 import { EXIT, GATE, WATER_LEVEL, bumpNormal } from './terrain';
 import type { Blocker } from './landmarks';
 
@@ -36,6 +35,7 @@ export class Gate {
     root.rotation.y = Math.atan2(face.x, face.z);
     root.updateMatrixWorld(true);
     const mat = gateMaterial();
+    const masonry = gateMaterial('masonry');
     const byName = new Map<string, THREE.Object3D>();
     let frame: THREE.Object3D | null = null;
     root.traverse((o) => {
@@ -43,7 +43,7 @@ export class Gate {
       if (o.userData.slab_open !== undefined) frame = o;
       const m = o as THREE.Mesh;
       if (!m.isMesh) return;
-      m.material = mat;
+      m.material = o.userData.surface === 'masonry' || o.name === 'gate_walls' ? masonry : mat;
       m.castShadow = m.receiveShadow = true;
     });
     const need = (n: string) => {
@@ -80,13 +80,14 @@ export class Gate {
     const frameMesh = need('gate_frame') as THREE.Mesh;
     // The masonry walls are their own mesh (crisp, not smoothed with the frame).
     const wallsMesh = byName.get('gate_walls') as THREE.Mesh | undefined;
-    for (const c of [...footprint(frameMesh), ...(wallsMesh ? footprint(wallsMesh) : [])]) {
+    const stoneMesh = byName.get('gate_masonry') as THREE.Mesh | undefined;
+    for (const c of [...footprint(frameMesh), ...(wallsMesh ? footprint(wallsMesh) : []), ...(stoneMesh ? footprint(stoneMesh) : [])]) {
       const w = c.clone().applyMatrix4(root.matrixWorld);
       this.obstacles.push(new THREE.Vector2(w.x, w.z));
     }
     // The refuge's open roof: soft ivory daylight falling on her side of the gate (the sun is
     // behind it, so without this the face of the gate sits in its own shadow).
-    const roof = new THREE.SpotLight(0xf1e6cf, 60, 26, 0.95, 1, 1.4);
+    const roof = new THREE.SpotLight(0xe1e5e3, 44, 26, 0.95, 1, 1.4);
     roof.position.set(0.5, 11, 7);
     roof.target.position.set(0, 1.2, 0.5);
     roof.castShadow = false;
@@ -162,14 +163,15 @@ export class Gate {
  * pitted plate, rain streaks running down, pale mineral crust that flakes, rust bleeding
  * from the edges. Tight in colour: charcoal and pewter metal, bone stone, muted rust.
  */
-export function gateMaterial() {
+export function gateMaterial(surface: 'mixed' | 'masonry' = 'mixed') {
   const m = new THREE.MeshStandardNodeMaterial();
+  m.envMapIntensity = surface === 'masonry' ? 0.4 : 0.8;
   const c = attribute('color', 'vec4');
   const ao = c.r;
   const pw = positionWorld;
   const vary = mx_fractal_noise_float(pw.mul(0.5), 2, 2, 0.5);
   const crust = clamp(c.g.add(vary.mul(0.3)), 0.0, 1.0);
-  const stone = smoothstep(0.35, 0.65, crust);
+  const stone = surface === 'masonry' ? float(1) : smoothstep(0.55, 0.8, crust);
   // Rain streaks: stretched noise, long in y.
   const streak = mx_fractal_noise_float(vec3(pw.x.mul(7), pw.y.mul(0.35), pw.z.mul(7)), 3, 2, 0.5);
   // Rust: the kit's mask, plus blooms across the plate (broken patches, as in the boards) and
@@ -177,37 +179,38 @@ export function gateMaterial() {
   const blooms = smoothstep(0.55, 0.72, mx_fractal_noise_float(pw.mul(1.7).add(vec3(3.3, 0, 1.1)), 3, 2, 0.5).mul(0.5).add(0.5)
     .add(mx_fractal_noise_float(pw.mul(6.0), 2, 2, 0.5).mul(0.12)));
   const seams = smoothstep(0.75, 1.0, sin(pw.y.mul(Math.PI / 0.62)).abs()).mul(smoothstep(0.2, 0.6, streak.add(0.35)));
-  // (Only on the iron: crust > 0.5 is masonry.)
-  const onIron = smoothstep(0.6, 0.4, c.g);
+  // Extra corrosion blooms and seam stains belong to iron, not masonry.
+  const onIron = float(1).sub(stone);
   const rust = smoothstep(0.3, 0.75, c.b.add(streak.mul(0.25))).max(blooms.mul(0.6).mul(onIron)).max(seams.mul(0.45).mul(onIron));
   // Pits: small worley cells in the plate; flakes where the crust sits.
   const pits = smoothstep(0.0, 0.18, mx_worley_noise_float(pw.mul(26)));
   const flake = smoothstep(0.15, 0.55, mx_fractal_noise_float(pw.mul(9), 2, 2, 0.5).abs());
   const grit = mx_fractal_noise_float(pw.mul(45), 2, 2, 0.5);
 
-  const iron = mix(color(PALETTE.charcoal), color(PALETTE.pewter), smoothstep(-0.4, 0.6, vary));
+  const iron = mix(color(0x343b3b), color(0x696e6a), smoothstep(-0.4, 0.6, vary));
   // Pale mineral bloom on the plate, in broad patches.
   const bloom = smoothstep(0.1, 0.75, mx_fractal_noise_float(vec3(pw.x.mul(2.2), pw.y.mul(0.6), pw.z.mul(2.2)).add(7), 3, 2, 0.5).add(streak.mul(0.3))).mul(float(1).sub(stone));
-  // Rust from deep brown to a brighter orange where it's flaking fresh.
-  const rustC = mix(color(0x5c3f2a), color(0x8a5a34), flake.mul(0.7));
-  const boneC = color(PALETTE.bone).mul(0.72);
+  // Muted brown corrosion with a lighter ochre edge where it flakes.
+  const rustC = mix(color(0x53473a), color(0x796047), flake.mul(0.7));
+  const boneC = mix(color(0x92958b), color(0xc4c5ba), crust);
   let base = mix(iron, boneC, stone);
   base = mix(base, boneC.mul(0.75), bloom.mul(0.3));
-  base = mix(base, rustC, rust.mul(0.8));
+  base = mix(base, rustC, rust.mul(mix(float(0.55), float(0.10), stone)));
   // Streaks darken (wet runs) or lighten (dried salt) a little; pits hold dark.
-  const tone = float(1).add(streak.mul(0.22)).mul(mix(float(0.55), float(1), pits)).mul(float(1).sub(flake.mul(stone).mul(0.2)));
-  m.colorNode = base.mul(tone).mul(mix(float(0.3), float(1.0), ao));
-  m.roughnessNode = mix(float(0.48), float(0.93), stone).add(rust.mul(0.15)).sub(streak.mul(0.08));
-  m.metalnessNode = mix(float(0.3), float(0.0), stone).mul(float(1).sub(rust.mul(0.7))).mul(float(1).sub(bloom));
+  const tone = float(1).add(streak.mul(0.12)).mul(mix(float(0.84), float(1), pits)).mul(float(1).sub(flake.mul(stone).mul(0.06)));
+  const damp = smoothstep(0.4, -0.05, pw.y);
+  m.colorNode = base.mul(tone).mul(mix(float(0.48), float(1.0), ao)).mul(float(1).sub(damp.mul(0.22)));
+  m.roughnessNode = mix(float(0.67), float(0.92), stone).add(rust.mul(0.06)).sub(damp.mul(0.16));
+  m.metalnessNode = mix(float(0.22), float(0.0), stone).mul(float(1).sub(rust.mul(0.7))).mul(float(1).sub(bloom));
   const relief = float(1).sub(pits).mul(0.0018).mul(float(1).sub(stone))
-    .add(flake.mul(0.003).mul(stone))
+    .add(flake.mul(0.0014).mul(stone))
     .add(rust.mul(flake).mul(0.0015))
     .add(grit.mul(0.0006))
-    .add(streak.mul(0.0012));
+    .add(streak.mul(0.0007));
   m.normalNode = bumpNormal(relief);
   // Lit for the camera in cutscenes, like the characters (core/filmLight.ts): the gate is a set
   // piece seen up close, mostly backlit, and its iron would read as black.
-  m.emissiveNode = filmLight(vec3((m.colorNode as any).rgb), 0.8);
+  m.emissiveNode = filmLight(vec3((m.colorNode as any).rgb), surface === 'masonry' ? 0.12 : 0.55);
   return m;
 }
 

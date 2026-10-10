@@ -10,10 +10,14 @@ import { PALETTE } from '../core/palette';
  * How the weather's light is shared: more from the sun, less from the sky's fill, so shade is
  * shade and the backlight reads (world/weather.ts multiplies its presets by these).
  */
-export const LIGHT = { sun: 1.15, fill: 0.72 };
+export const LIGHT = { sun: 1.08, fill: 0.72 };
 
 /** Toward the sun. Weather (world/weather.ts) moves it in place for the time of day. */
 export const SUN_DIR = new THREE.Vector3(-0.42, 0.3, -1).normalize();
+/** Direct sunlight relative to clear day; shared by sky, shafts and surface glints. */
+export const uDirectSun = uniform(1);
+/** Shared with the story's gradual reveal of the refuge. */
+export const ATMOSPHERE_BASE = { mist: 0.32, fog: 0.016 } as const;
 
 /** Sky dome, haze with sun in-scattering, sun + fill light. */
 export function createAtmosphere(scene: THREE.Scene, shadowSize: number) {
@@ -29,8 +33,8 @@ export function createAtmosphere(scene: THREE.Scene, shadowSize: number) {
   // disc); away from it, a dim cooler veil, so the far side of the grove keeps its depth and the
   // backlit side burns, as in the boards. Far things dissolve into exactly the sky behind them.
   const uHazeAway = uniform(0.66);
-  const uMie = uniform(0.55);
-  const uMieCore = uniform(0.8);
+  const uMie = uniform(0.34);
+  const uMieCore = uniform(0.65);
   const skyAt = (d: any) => {
     const c = dot(d, uSun);
     const s = max(c, 0.0);
@@ -38,46 +42,47 @@ export function createAtmosphere(scene: THREE.Scene, shadowSize: number) {
     const base = mix(horizon.mul(0.95), zenith.mul(0.8), up)
       .mul(mix(uHazeAway, float(1.0), smoothstep(-0.7, 0.85, c)))
       .mul(mix(vec3(0.96, 0.98, 1.03), vec3(1), smoothstep(-0.3, 0.5, c)));
-    return base.add(sunCol.mul(pow(s, 5.0).mul(uMie).add(pow(s, 40.0).mul(uMieCore))));
+    return base.add(sunCol.mul(pow(s, 5.0).mul(uMie).add(pow(s, 40.0).mul(uMieCore))).mul(uDirectSun));
   };
   scene.backgroundNode = Fn(() => {
     const d = positionWorldDirection;
     const s = max(dot(d, uSun), 0.0);
     // The disc itself, and its tight halo, only in the sky.
-    return skyAt(d).add(sunCol.mul(pow(s, 220.0).mul(1.6).add(pow(s, 2000.0).mul(30.0))));
+    return skyAt(d).add(sunCol.mul(pow(s, 220.0).mul(1.3).add(pow(s, 2000.0).mul(30.0))).mul(uDirectSun));
   })();
   // For the haze, looking at the ground: the sky's colour toward the horizon in that direction.
   const hazeColor = Fn(() => {
     const v = normalize(positionWorld.sub(cameraPosition));
     return skyAt(vec3(v.x, v.y.clamp(-0.05, 0.25), v.z).normalize());
   })();
-  const uFogDensity = uniform(0.019);
+  const uFogDensity = uniform(ATMOSPHERE_BASE.fog);
   // The haze thickens from a few metres out: what's at her feet keeps its full contrast.
-  const uFogStart = uniform(7);
+  const uFogStart = uniform(9);
   // Weather's share (world/weather.ts), added on top of what the story sets.
   const uFogExtra = uniform(0);
   const uMistExtra = uniform(0);
   // Ground mist: pools below about a metre (over water and in hollows), thickens with
   // distance so what's near stays clear, and drifts slowly in broken banks.
-  const uMist = uniform(0.42);
+  const uMist = uniform(ATMOSPHERE_BASE.mist);
   const mist = Fn(() => {
     const p = positionWorld;
-    const low = smoothstep(1.1, -0.15, p.y);
+    const low = smoothstep(0.85, 0.02, p.y);
     const dist = length(p.sub(cameraPosition));
-    const far = float(1).sub(exp(dist.mul(-0.085)));
-    const drift = mx_fractal_noise_float(vec3(p.xz.mul(0.07).add(vec2(time.mul(0.025), time.mul(0.008))), time.mul(0.01)), 3, 2, 0.5)
-      .mul(0.6).add(0.6).clamp(0, 1);
-    return low.mul(far).mul(drift).mul(uMist.add(uMistExtra));
+    const far = smoothstep(5.0, 32.0, dist);
+    const drift = mx_fractal_noise_float(vec3(p.xz.mul(0.07).add(vec2(time.mul(0.025), time.mul(0.008))), time.mul(0.01)), 3, 2, 0.5);
+    // Broken banks leave clear water between them; near feet and roots keep their contrast.
+    const bank = smoothstep(-0.12, 0.30, drift).mul(0.88).add(0.12);
+    return low.mul(far).mul(bank).mul(uMist.add(uMistExtra));
   })();
   const hazeFactor = Fn(() => {
     const d = max(length(positionWorld.sub(cameraPosition)).sub(uFogStart), 0.0);
-    const k = d.mul(uFogDensity.add(uFogExtra));
+    const k = d.mul(uFogDensity.add(uFogExtra).max(0));
     return float(1).sub(exp(k.mul(k).negate()));
   })();
   scene.fogNode = fog(hazeColor, max(hazeFactor, mist));
 
   // Diffuse light from the pale sky and mineral ground keeps shaded ceramic legible.
-  const hemi = new THREE.HemisphereLight(PALETTE.sky, 0xa39c89, 1.35);
+  const hemi = new THREE.HemisphereLight(0xd5e0e8, 0x79786e, 1.35);
   scene.add(hemi);
 
   const sun = new THREE.DirectionalLight(PALETTE.sun, 3.6);
@@ -102,15 +107,15 @@ export function createAtmosphere(scene: THREE.Scene, shadowSize: number) {
     c.right = c.top = 16;
     c.near = 1;
     c.far = 90;
-    sun.shadow.bias = -0.0004;
-    sun.shadow.normalBias = 0.03;
+    sun.shadow.bias = -0.00025;
+    sun.shadow.normalBias = 0.008;
     sun.shadow.radius = 1.6;   // crisp, like the films' hard sun through the thorns
   }
   scene.add(sun, sun.target);
 
   return {
     sun, hemi, uFogDensity, uMist, uSunCol, uHorizon, uZenith, uFogExtra, uMistExtra,
-    uClouds, uHazeAway, uMie, uMieCore, uFogStart,
+    uClouds, uHazeAway, uMie, uMieCore, uFogStart, uDirectSun,
     /** Keep the shadow frustum centred on the player. */
     follow(p: THREE.Vector3) {
       uSunColor.value.copy(sun.color).multiplyScalar(sun.intensity);

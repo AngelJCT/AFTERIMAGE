@@ -13,7 +13,7 @@ import { heightAt, BOUNDS, GROVE_PATH, ROUTE, EXIT, GATE, WAKE_POINT, POOL, MIRR
  */
 type Kind = 'creeper' | 'arch' | 'tangle';
 const KINDS: Record<string, Kind> = { creeper_a: 'creeper', creeper_b: 'creeper', arch_a: 'arch', arch_b: 'arch', tangle_a: 'tangle', tangle_b: 'tangle' };
-const CLEAR: Record<Kind, number> = { creeper: 0.9, arch: 2.0, tangle: 2.6 };
+const CLEAR: Record<Kind, number> = { creeper: 1.1, arch: 2.4, tangle: 3.0 };
 
 function mulberry(seed: number) {
   return () => {
@@ -44,6 +44,17 @@ export async function loadThorns(url: string, scale: number, thickets: THREE.Vec
     for (const line of paths) for (let i = 0; i + 1 < line.length; i++) m = Math.min(m, segDist(x, z, line[i], line[i + 1]));
     return m;
   };
+  const awayFromPath = (x: number, z: number) => {
+    let distance = Infinity, yaw = 0;
+    for (const line of paths) for (let i = 0; i + 1 < line.length; i++) {
+      const a = line[i], b = line[i + 1], dx = b.x - a.x, dz = b.z - a.z;
+      const t = THREE.MathUtils.clamp(((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz || 1), 0, 1);
+      const ox = x - a.x - dx * t, oz = z - a.z - dz * t;
+      const d = Math.hypot(ox, oz);
+      if (d < distance) { distance = d; yaw = Math.atan2(-oz, ox); }
+    }
+    return { distance, yaw };
+  };
   const framed = [[MIRROR, 3.0], [POOL, 1.6], [WAKE_POINT, 1.3], [GATE, 10]] as const;
   const r = mulberry(29);
   const placed = new Map<string, THREE.Matrix4[]>();
@@ -56,9 +67,18 @@ export async function loadThorns(url: string, scale: number, thickets: THREE.Vec
     const options = pieces.filter((p) => p.kind === kind);
     const piece = options[Math.floor(r() * options.length)];
     const k = (kind === 'tangle' ? 0.8 + r() * 0.5 : 0.8 + r() * 0.4) * size;
-    e.set(0, r() * Math.PI * 2, 0);
+    const randomYaw = r() * Math.PI * 2;
+    const stretchY = 0.85 + r() * 0.3;
+    const shape = mulberry(Math.round(x * 1093) ^ Math.round(z * 8017));
+    const route = awayFromPath(x, z);
+    // The arch kit grows along +X. Aim nearby arches into their thicket so the path
+    // gets an opening, rather than a repeated wall of stems crossing at eye height.
+    const yaw = kind === 'arch' && route.distance < 7 ? route.yaw + (shape() - 0.5) * 0.55 : randomYaw;
+    const height = kind === 'creeper' ? 0.82 : route.distance < 6 ? 0.64 : 0.78;
+    e.set((shape() - 0.5) * 0.07, yaw, (shape() - 0.5) * 0.09);
     q.setFromEuler(e);
-    m.compose(new THREE.Vector3(x, y - 0.01, z), q, s.set(k, k * (0.85 + r() * 0.3), k));
+    m.compose(new THREE.Vector3(x, y - 0.015, z), q,
+      s.set(k * (0.82 + shape() * 0.24), k * stretchY * height, k * (0.7 + shape() * 0.35)));
     (placed.get(piece.name) ?? placed.set(piece.name, []).get(piece.name)!).push(m.clone().multiply(piece.mesh.matrixWorld));
     return true;
   };
@@ -69,13 +89,13 @@ export async function loadThorns(url: string, scale: number, thickets: THREE.Vec
       if (put(kinds[Math.floor(r() * kinds.length)], c.x + Math.cos(a) * d, c.z + Math.sin(a) * d)) i++;
     }
   };
-  ring(WAKE_POINT, 1.3, 6, Math.round(12 * scale), ['creeper', 'creeper', 'arch']);
-  ring(POOL, 2.5, 8, Math.round(12 * scale), ['creeper', 'arch', 'tangle']);
+  ring(WAKE_POINT, 1.3, 6, Math.round(8 * scale), ['creeper', 'creeper', 'arch']);
+  ring(POOL, 2.5, 8, Math.round(8 * scale), ['creeper', 'arch', 'tangle']);
   // Thickets where two in three of the grove's dead trees stood: a big spiralling tangle, a ring
   // of arching brambles round it, a creeper at its foot (the spots are already clear of paths).
   for (const t of thickets) {
-    put('tangle', t.x, t.y, 1.5 + r() * 0.5, true);
-    const n = 1 + Math.floor(r() * 3);
+    put('tangle', t.x, t.y, 1.25 + r() * 0.3, true);
+    const n = Math.floor(r() * 3);
     for (let k = 0; k < n; k++) {
       const a = r() * Math.PI * 2, d = 0.8 + r() * 1.2;
       put(r() < 0.7 ? 'arch' : 'tangle', t.x + Math.cos(a) * d, t.y + Math.sin(a) * d, 1.1 + r() * 0.3);
@@ -83,7 +103,7 @@ export async function loadThorns(url: string, scale: number, thickets: THREE.Vec
     put('creeper', t.x + (r() - 0.5) * 2, t.y + (r() - 0.5) * 2);
   }
   // And through the grove, thinning outward.
-  const total = Math.round(40 * scale);
+  const total = Math.round(30 * scale);
   for (let i = 0, guard = 0; i < total && guard < total * 12; guard++) {
     const a = r() * Math.PI * 2, d = Math.sqrt(r()) * (BOUNDS.r + 6);
     const kind: Kind = r() < 0.45 ? 'creeper' : r() < 0.55 ? 'arch' : 'tangle';
@@ -91,6 +111,7 @@ export async function loadThorns(url: string, scale: number, thickets: THREE.Vec
   }
   const group = new THREE.Group();
   group.name = 'thorns';
+  group.userData.pieces = [...placed.values()].reduce((n, list) => n + list.length, 0);
   const mat = groveMaterial();
   for (const piece of pieces) {
     const mats = placed.get(piece.name);

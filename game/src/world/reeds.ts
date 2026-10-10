@@ -21,7 +21,7 @@ function tuftGeometry(seed: number) {
   const r = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
   const blades = 9 + Math.floor(r() * 6);
   for (let b = 0; b < blades; b++) {
-    const a = r() * Math.PI * 2, lean = 0.15 + r() * 0.45, h = 0.3 + r() * 0.6, w = 0.008 + r() * 0.008;
+    const a = r() * Math.PI * 2, lean = 0.15 + r() * 0.45, h = 0.3 + r() * 0.6, w = 0.003 + r() * 0.004;
     const base = [Math.cos(a) * r() * 0.06, Math.sin(a) * r() * 0.06];
     const dir = [Math.cos(a), Math.sin(a)];
     const side = [-dir[1], dir[0]];
@@ -31,7 +31,7 @@ function tuftGeometry(seed: number) {
       const t = i / seg;
       const out = lean * h * t * t;                 // curving outward as it rises
       const cx = base[0] + dir[0] * out, cz = base[1] + dir[1] * out, cy = h * t * (1 - 0.2 * t * lean);
-      const ww = w * (1 - t * 0.85);
+      const ww = w * (1 - t * 0.98);
       pos.push(cx + side[0] * ww, cy, cz + side[1] * ww, cx - side[0] * ww, cy, cz - side[1] * ww);
       hts.push(t, t);
     }

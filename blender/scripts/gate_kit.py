@@ -12,7 +12,8 @@ origin is its bottom centre, so the game lifts it by moving it up (0 = shut).
 Vertex colours match the grove kit: R = baked AO, G = mineral crust, B = rust.
 Named points the game needs go in the frame's glTF extras, already in glTF (Y-up) space.
 
-Objects: gate_frame, gate_slab, gate_bolt, gate_receiver, gate_cable, gate_plug.
+Objects: gate_frame, gate_walls, gate_masonry, gate_slab, gate_bolt, gate_receiver,
+gate_cable, gate_plug. Walls and masonry carry a separate mineral material tag.
 
 Usage: Blender -b --factory-startup -P gate_kit.py -- out.glb
 """
@@ -118,6 +119,13 @@ def displace(ob, strength, size, basis='VORONOI_F2'):
     bpy.ops.object.modifier_apply(modifier="d")
 
 
+def bevel(ob, width):
+    bpy.context.view_layer.objects.active = ob
+    m = ob.modifiers.new('Worn arrises', 'BEVEL')
+    m.width = width; m.segments = 3; m.limit_method = 'ANGLE'
+    bpy.ops.object.modifier_apply(modifier=m.name)
+
+
 def masks(ob, crust_bias, rust_amt, crust_scale=1.6, crust_max=1.0):
     """G = crust, B = rust; R is filled by the AO bake later."""
     me = ob.data
@@ -158,26 +166,32 @@ def decimate(ob, budget):
 
 # ---------------------------------------------------------------- walls (ruined masonry)
 def stone_block(bm, c, size, r, tilt=None):
-    """One dressed stone: a bevelled box, its faces a little uneven and its corners chipped."""
-    before = set(bm.verts)
-    g = bmesh.ops.create_cube(bm, size=1.0)
-    vs = g["verts"]
+    """Closed dressed stone with a few broken corners and rounded, worn arrises."""
+    block = bmesh.new()
+    vs = bmesh.ops.create_cube(block, size=1.0)["verts"]
     for v in vs:
-        v.co = Vector((v.co.x * size.x * 2, v.co.y * size.y * 2, v.co.z * size.z * 2))   # size: half extents
-    edges = list({e for v in vs for e in v.link_edges})
-    bmesh.ops.bevel(bm, geom=vs + edges, offset=min(0.035, size.z * 0.12), segments=1, profile=0.5, affect='EDGES')
-    allv = [v for v in bm.verts if v not in before]
-    for v in allv:
+        v.co = Vector((v.co.x * size.x * 2, v.co.y * size.y * 2, v.co.z * size.z * 2))
+    # Geometry is cut and capped, rather than folding arbitrary face corners inward.
+    for _ in range(r.randint(1, 3)):
+        corner = Vector((r.choice((-1, 1)) * size.x, r.choice((-1, 1)) * size.y, size.z))
+        normal = Vector((math.copysign(1, corner.x), math.copysign(0.7, corner.y), 1)).normalized()
+        bmesh.ops.bisect_plane(block, geom=list(block.verts) + list(block.edges) + list(block.faces),
+                              dist=0.00001, plane_co=corner - normal * r.uniform(0.035, 0.095),
+                              plane_no=normal, clear_outer=True)
+        bmesh.ops.holes_fill(block, edges=[e for e in block.edges if e.is_boundary], sides=0)
+    bmesh.ops.bevel(block, geom=list(block.edges), offset=min(0.04, size.z * 0.18),
+                    segments=2, profile=0.55, affect='EDGES', clamp_overlap=True)
+    for v in block.verts:
         p = v.co
-        # Uneven faces, and now and then a corner knocked off.
-        p += Vector((r.uniform(-1, 1), r.uniform(-1, 1), r.uniform(-1, 1))) * 0.012
-        corner = abs(p.x) > size.x * 0.4 and abs(p.z) > size.z * 0.35
-        if corner and r.random() < 0.25:
-            p -= Vector((math.copysign(0.06, p.x), 0, math.copysign(0.05, p.z)))
+        # Broad, coherent erosion retains planar faces and softened highlights.
+        p += Vector((noise.noise(p * 4 + c), noise.noise(p * 3 + c + Vector((7, 1, 2))),
+                     noise.noise(p * 5 + c + Vector((1, 9, 3))))) * min(0.009, size.z * 0.08)
     M = Matrix.Translation(c)
     if tilt is not None:
         M = M @ tilt
-    bmesh.ops.transform(bm, matrix=M, verts=allv)
+    copied = {v: bm.verts.new(M @ v.co) for v in block.verts}
+    for face in block.faces: bm.faces.new([copied[v] for v in face.verts])
+    block.free()
 
 
 def wall(x0, x1, outer):
@@ -215,7 +229,7 @@ def wall(x0, x1, outer):
             # A few blocks missing out of the face higher up.
             if z > 1.4 and r.random() < 0.05 * (z / 5):
                 continue
-            gap = 0.025
+            gap = 0.014
             size = Vector(((bx1 - bx0) / 2 - gap, D - r.uniform(0.0, 0.04), h / 2 - gap))
             c = Vector((cx, r.uniform(-0.02, 0.02), z + h / 2))
             tilt = None
@@ -234,7 +248,7 @@ def wall(x0, x1, outer):
         tilt = Matrix.Rotation(r.uniform(-0.5, 0.5), 4, 'X') @ Matrix.Rotation(r.uniform(0, math.tau), 4, 'Z')
         stone_block(bm, c, size, r, tilt)
     ob = new_obj("wall", bm)
-    masks(ob, 0.5, 0.2, 0.9)
+    masks(ob, 0.78, 0.10, 0.42)
     return ob
 
 
@@ -248,17 +262,18 @@ for x0, x1 in ((XL0, XL1), (XR0, XR1)):
     # Plinths and a cap course.
     box(bm, x0 - 0.08, x1 + 0.08, -D - 0.12, D + 0.12, -0.3, 0.35)
     box(bm, x0 - 0.06, x1 + 0.06, -D - 0.1, D + 0.1, TOP - 0.05, TOP + 0.12)
-    # Iron straps wrapped round the stone.
-    for z in (0.98, 2.4, 3.9, 5.4):
-        box(bm, x0 - 0.03, x1 + 0.03, -D - 0.09, D + 0.09, z, z + 0.16)
 # Lintel beam across the top of both.
 subdivided(bm, box(bm, XL0 - 0.1, XR1 + 0.1, -D - 0.12, D + 0.12, TOP + 0.12, TOP + 0.75), 8)
 box(bm, XL0 - 0.2, XR1 + 0.2, -D - 0.18, D + 0.18, TOP + 0.75, TOP + 0.92)
 jambs = new_obj("jambs", bm)
-displace(jambs, 0.05, 0.5)
-masks(jambs, 0.2, 0.3, 1.0, crust_max=0.55)
+bevel(jambs, 0.035)
+displace(jambs, 0.018, 0.5)
+masks(jambs, 0.78, 0.08, 0.42)
 
 bm = bmesh.new()
+for x0, x1 in ((XL0, XL1), (XR0, XR1)):
+    for z in (0.98, 2.4, 3.9, 5.4):
+        box(bm, x0 - 0.03, x1 + 0.03, -D - 0.09, D + 0.09, z, z + 0.16)
 for x_face, s in ((XL1, 1), (XR0, -1)):
     # Channel lips either side of the slab, set into the jamb's inner face.
     for y in (-SLAB_T / 2 - 0.1, SLAB_T / 2 + 0.02):
@@ -275,6 +290,7 @@ subdivided(bm, box(bm, XL1 - 0.1, XR0 + 0.1, SLAB_T / 2 + 0.1, SLAB_T / 2 + 0.26
 for z in (OH + 0.6, OH + 1.5, OH + 2.4, OH + 3.2):
     box(bm, XL1 - 0.1, XR0 + 0.1, SLAB_T / 2 + 0.08, SLAB_T / 2 + 0.12, z, z + 0.12)
 rails = new_obj("rails", bm)
+bevel(rails, 0.008)
 masks(rails, 0.0, 0.5, crust_max=0.3)
 
 # ---------------------------------------------------------------- crown: pointed arch grille
@@ -357,24 +373,52 @@ grown = grow.mesh()
 masks(grown, 0.05, 0.9)
 
 # ---------------------------------------------------------------- paving under the water
+# Long courses with worn joints and missing patches; most of the pavement has sunk into
+# the silt. The central walking surface stays within 3 cm of the existing analytic floor.
 bm = bmesh.new()
-for ix in range(-9, 10):
-    for iy in range(-7, 4):
-        x0 = ix * 1.05 + rng.uniform(-0.04, 0.04)
-        y0 = iy * 1.05 + (0.5 if ix % 2 else 0.0) + rng.uniform(-0.04, 0.04)
-        if abs(y0 + 0.5) < 0.7 and XL1 - 0.2 < x0 < XR0 + 0.2:
-            continue      # the sill sits here
-        if rng.random() < 0.08:
-            continue      # a missing slab: mud and water show through
-        z = rng.uniform(-0.05, 0.0)
-        vs = box(bm, x0 + 0.02, x0 + 1.02, y0 + 0.02, y0 + 1.02, z - 0.15, z)
-        tilt = Matrix.Rotation(rng.uniform(-0.025, 0.025), 4, 'X') @ Matrix.Rotation(rng.uniform(-0.025, 0.025), 4, 'Y')
-        c = Vector((x0 + 0.52, y0 + 0.52, z))
-        bmesh.ops.transform(bm, matrix=Matrix.Translation(c) @ tilt @ Matrix.Translation(-c), verts=vs)
+rp = random.Random(107)
+y = -7.8
+row = 0
+while y < 4.0:
+    depth = rp.uniform(0.65, 1.12)
+    x = -9.8 - (0.45 if row % 2 else 0)
+    while x < 9.6:
+        width = rp.uniform(0.65, 1.4)
+        cx, cy = x + width / 2, y + depth / 2
+        x += width
+        if abs(cy + 0.5) < 0.7 and XL1 - 0.2 < cx < XR0 + 0.2: continue
+        # Eroded patches form coherent gaps rather than a regular checkerboard.
+        missing = noise.noise(Vector((cx * 0.38, cy * 0.38, 6))) > 0.30
+        if missing or rp.random() < 0.07: continue
+        z = rp.uniform(-0.116, -0.098)
+        stone_block(bm, Vector((cx, cy, z - 0.055)),
+                    Vector((width / 2 - 0.012, depth / 2 - 0.012, 0.055)), rp)
+    y += depth
+    row += 1
 paving = new_obj("paving", bm)
-masks(paving, 0.75, 0.15)
+masks(paving, 0.82, 0.08, 0.35)
 
-frame_parts = walls + [jambs, rails, crown, grown, paving]
+# Old supply runs remain on the side walls. Frayed ends explain the disconnection without
+# adding a second usable socket or changing the chapter's receiver and cable.
+service = Curves('service_runs', res=2, ures=5)
+bm = bmesh.new()
+for a, b, z in ((-8.5, -3.0, 0.62), (4.2, 8.4, 1.16)):
+    pts = [Vector((a, -D - 0.045, z)), Vector((a + 1.0, -D - 0.06, z + 0.06)),
+           Vector((b - 0.35, -D - 0.08, z)), Vector((b, -D - 0.20, z - 0.22))]
+    service.add(pts, [0.047, 0.047, 0.042, 0.032])
+    for x in (a + 0.3, a + 1.8, b - 0.6):
+        box(bm, x - 0.055, x + 0.055, -D - 0.14, -D - 0.015, z - 0.09, z + 0.09)
+    for k in range(3):
+        tip0 = pts[-1]
+        service.add([tip0, tip0 + Vector((0.06, -0.025 * k, -0.12)),
+                     tip0 + Vector((0.12 + k * 0.035, -0.04 * k, -0.18 - k * 0.04))], [0.005, 0.004, 0.002])
+service_mesh = service.mesh()
+clamps = new_obj('service_clamps', bm)
+bevel(clamps, 0.008)
+for o in (service_mesh, clamps): masks(o, 0.08, 0.6, crust_max=0.3)
+frame_parts = [rails, crown, grown, service_mesh, clamps]
+masonry = join('gate_masonry', [jambs, paving])
+masonry['surface'] = 'masonry'
 
 # ---------------------------------------------------------------- the slab
 bm = bmesh.new()
@@ -500,9 +544,12 @@ frame = join("gate_frame", frame_parts)
 gate_walls = join("gate_walls", [walls_left, walls_right])
 for ob, budget in ((frame, 42000), (slab, 12000), (bolt, 600), (receiver, 4000), (cable, 3000), (plug, 1200)):
     decimate(ob, budget)
-# The masonry keeps its facets.
-for p in gate_walls.data.polygons: p.use_smooth = False
-print("gate_walls tris", sum(len(p.vertices) - 2 for p in gate_walls.data.polygons))
+# The masonry keeps its broad faces and small bevel facets.
+for ob in (gate_walls, masonry):
+    ob.data.validate(); ob.data.update()
+    for p in ob.data.polygons: p.use_smooth = False
+    print(ob.name, 'tris', sum(len(p.vertices) - 2 for p in ob.data.polygons))
+gate_walls['surface'] = 'masonry'
 
 # AO bake into R, everything in place (slab shut).
 bpy.ops.mesh.primitive_plane_add(size=200, location=(0, 0, -0.1))
@@ -518,7 +565,7 @@ try:
     scene.cycles.device = 'GPU'
 except Exception as e:
     print("GPU unavailable", e)
-parts = (frame, gate_walls, slab, bolt, receiver, cable, plug)
+parts = (frame, gate_walls, masonry, slab, bolt, receiver, cable, plug)
 for ob in parts:
     me = ob.data
     ao = me.color_attributes.new("AO", 'BYTE_COLOR', 'POINT')

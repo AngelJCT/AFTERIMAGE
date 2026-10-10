@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { Fn, uniform, vec2, vec3, vec4, mod, time, hash, instanceIndex, instancedArray, cameraPosition, uv, smoothstep, abs, positionWorld, distance } from 'three/tsl';
 import type { Game } from '../main';
-import { LIGHT, SUN_DIR, uDustDrift, uDustLevel } from './atmosphere';
+import { LIGHT, SUN_DIR, uDirectSun, uDustDrift, uDustLevel } from './atmosphere';
 import { PALETTE } from '../core/palette';
 import { heightAt, WATER_LEVEL } from './terrain';
 
@@ -20,13 +20,13 @@ interface Preset {
   fog: number; mist: number; clouds: number; wind: number; dust: number; rain: number;
 }
 export const PRESETS = {
-  day: { elev: 15.7, sun: PALETTE.sun, sunI: 4.8, horizon: PALETTE.haze, zenith: PALETTE.sky, hemi: 1.0, fog: 0, mist: 0, clouds: 0.42, wind: 1, dust: 1, rain: 0 },
+  day: { elev: 15.7, sun: PALETTE.sun, sunI: 4.8, horizon: PALETTE.haze, zenith: 0xdce2e3, hemi: 1.0, fog: 0, mist: 0, clouds: 0.42, wind: 1, dust: 1, rain: 0 },
   late: { elev: 9, sun: 0xffdcae, sunI: 4.3, horizon: 0xcbbb9c, zenith: 0xeadcc2, hemi: 0.95, fog: 0.002, mist: 0.1, clouds: 0.45, wind: 1.1, dust: 1.2, rain: 0 },
   dusk: { elev: 3, sun: 0xffa66c, sunI: 2.5, horizon: 0xa9937b, zenith: 0x9fa4a7, hemi: 0.78, fog: 0.006, mist: 0.3, clouds: 0.5, wind: 0.8, dust: 1.4, rain: 0 },
   storm: { elev: 12, sun: 0xffd6a0, sunI: 1.6, horizon: 0xb59c74, zenith: 0xc8b28b, hemi: 1.0, fog: 0.04, mist: 0.5, clouds: 0.85, wind: 2.6, dust: 3.2, rain: 0 },
   // The other side (chapter VI): night, a cold low light, the air clear and still.
   other: { elev: 22, sun: 0xb9c9e6, sunI: 0.9, horizon: 0x2f343c, zenith: 0x14171d, hemi: 0.42, fog: -0.008, mist: 0.2, clouds: 0.1, wind: 0.2, dust: 0.35, rain: 0 },
-  rain: { elev: 14, sun: 0xdde2e2, sunI: 0.9, horizon: 0x9d9e98, zenith: 0xb9bdb9, hemi: 1.0, fog: 0.01, mist: 0.4, clouds: 0.95, wind: 1.5, dust: 0.15, rain: 1 },
+  rain: { elev: 14, sun: 0xdde2e2, sunI: 0.65, horizon: 0xb4b9b5, zenith: 0xcbd1cf, hemi: 2.2, fog: 0.01, mist: 0.4, clouds: 0.95, wind: 1.5, dust: 0.15, rain: 1 },
 } satisfies Record<string, Preset>;
 export type WeatherName = keyof typeof PRESETS;
 
@@ -140,10 +140,13 @@ export class Weather {
     SUN_DIR.set(Math.sin(AZIMUTH) * Math.cos(e), Math.sin(e), Math.cos(AZIMUTH) * Math.cos(e));
     atmos.sun.color.copy(w.sun);
     atmos.sun.intensity = w.sunI * LIGHT.sun;
+    // Cloud cover hides the disc and its specular sparkle, while diffuse sky light remains.
+    uDirectSun.value = (w.sunI / PRESETS.day.sunI) * (1 - THREE.MathUtils.smoothstep(w.clouds, 0.5, 0.98));
     atmos.uSunCol.value.copy(w.sun);
     atmos.uHorizon.value.copy(w.horizon);
     atmos.uZenith.value.copy(w.zenith);
     atmos.hemi.intensity = w.hemi * LIGHT.fill;
+    atmos.hemi.color.setHex(0xd5e0e8).lerp(w.sun, 0.12);
     atmos.uFogExtra.value = w.fog;
     atmos.uMistExtra.value = w.mist;
     atmos.uClouds.value = w.clouds;

@@ -3,6 +3,7 @@
 # Usage: blender/rig_character.sh <quads.glb> [out.glb] [highpoly.glb|-] [head.glb]
 # highpoly: its surface detail is baked into the body normal map.
 # head: a separate head scan replaces the body's head (fitted, simplified, skinned).
+# LAYERED_ARMOR=1 adds the woman's ceramic plates after the rig/head are finished.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 IN="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
@@ -35,6 +36,12 @@ if [ -n "$HEAD" ]; then
   "$BLENDER" -b -P blender/scripts/swap_head.py -- "$PWD/$W/woman_rigged.blend" "$HEADABS" "$PWD/$W/head_xform.json" "$PWD/$W" 55000 | grep -E "head low|SWAP_OK"
   "$BLENDER" -b -P blender/scripts/eye_data.py -- "$PWD/$W/woman_rigged.blend" | grep -E "^L |^R |EYES_OK|shape key|EYELIDS_OK"
 fi
-echo "5/5 export";        "$BLENDER" -b -P blender/scripts/export_game.py -- "$PWD/$W/woman_rigged.blend" "$PWD/$OUT.tmp.glb" 2048 | grep EXPORT_OK
+EXPORT_SOURCE="$PWD/$W/woman_rigged.blend"
+if [ "${LAYERED_ARMOR:-0}" = 1 ]; then
+  echo "   + layered ceramic"
+  "$BLENDER" -b -P blender/scripts/layered_armor.py -- "$EXPORT_SOURCE" "$PWD/$W/woman_armored.blend" | grep ARMOR_OK
+  EXPORT_SOURCE="$PWD/$W/woman_armored.blend"
+fi
+echo "5/5 export";        "$BLENDER" -b -P blender/scripts/export_game.py -- "$EXPORT_SOURCE" "$PWD/$OUT.tmp.glb" 2048 | grep EXPORT_OK
 (cd game && npx gltf-transform meshopt "../$OUT.tmp.glb" "../$OUT" >/dev/null) && rm "$OUT.tmp.glb"
 ls -la "$OUT"

@@ -9,7 +9,7 @@ import { REFERENCES } from './referenceCatalog';
 import './inspection.css';
 
 type Mode = 'still' | Motion;
-type View = 'front' | 'three-quarter' | 'side' | 'back' | 'portrait';
+type View = 'front' | 'three-quarter' | 'side' | 'back' | 'portrait' | 'artwork';
 
 /** Repeatable studies of the shipped rig. Never start the story or write player progress. */
 export function installInspection(g: Game) {
@@ -31,7 +31,7 @@ export function installInspection(g: Game) {
       <span class="study-note">Locked camera · fixed light · 60 Hz playback</span></header>
     <div class="study-tools">
       <label>Movement<select name="motion"><option value="still">Standing</option>${Object.entries(MOTIONS).map(([id, m]) => `<option value="${id}">${m.label}</option>`).join('')}</select></label>
-      <label>Camera<select name="view"><option value="front">Front</option><option value="three-quarter">Three-quarter</option><option value="side">Side</option><option value="back">Back</option><option value="portrait">Portrait</option></select></label>
+      <label>Camera<select name="view"><option value="front">Front</option><option value="three-quarter">Three-quarter</option><option value="side">Side</option><option value="back">Back</option><option value="portrait">Portrait</option><option value="artwork">Artwork · grove</option></select></label>
       <label>Light<select name="light"><option value="day">Film daylight</option><option value="late">Late afternoon</option><option value="rain">Overcast</option></select></label>
       <label class="study-clear"><input name="clear" type="checkbox">Clear foreground</label>
       <label>Reference<select name="reference">${Object.entries(REFERENCES).map(([id, r]) => `<option value="${id}">${r.label}</option>`).join('')}</select></label>
@@ -50,7 +50,7 @@ export function installInspection(g: Game) {
   const stage = field<HTMLDivElement>('.study-stage');
   const img = field<HTMLImageElement>('.study-image img');
   const timeline = field<HTMLInputElement>('[name=time]');
-  const clutter = new Set(['grove', 'arches', 'landmarks', 'gate', 'rocks', 'debris', 'thorns', 'reeds', 'crossing', 'otherSide']);
+  const clutter = new Set(['grove', 'arches', 'landmarks', 'gate', 'rocks', 'debris', 'thorns', 'reeds', 'shoreline', 'crossing', 'otherSide']);
   const scenery = g.scene.children.filter(o => clutter.has(o.name)).map(object => ({ object, visible: object.visible }));
   const clearForeground = () => {
     const clear = field<HTMLInputElement>('[name=clear]').checked;
@@ -67,8 +67,8 @@ export function installInspection(g: Game) {
   Object.defineProperty(g.input, 'running', { configurable: true, get: () => running });
 
   const frameCamera = () => {
-    shot.lens = view === 'portrait' ? 85 : 55;
-    const angle = { front: 0, 'three-quarter': 0.42, side: Math.PI / 2, back: Math.PI, portrait: 0.25 }[view];
+    shot.lens = view === 'portrait' ? 85 : view === 'artwork' ? 65 : 55;
+    const angle = { front: 0, 'three-quarter': 0.42, side: Math.PI / 2, back: Math.PI, portrait: 0.25, artwork: 0.64 }[view];
     const yaw = mode === 'still' ? p.yaw : Math.PI;
     const fov = lensToFov(shot.lens, g.cam.camera.aspect) * THREE.MathUtils.DEG2RAD;
     // Fit the whole body even in a narrow split view; no clipped toes or hair.
@@ -81,8 +81,8 @@ export function installInspection(g: Game) {
     g.input.look.x = g.input.look.y = g.input.zoom = 0;
     g.cam.update(0, g.input, p.position, false, p.yaw, p.pose.speed);
     g.post.uFocus.value = g.cam.focusDistance;
-    g.post.uFocusRange.value = 6;
-    g.post.uBokeh.value = 0;
+    g.post.uFocusRange.value = view === 'artwork' ? 1.1 : 6;
+    g.post.uBokeh.value = view === 'artwork' && g.q.dof ? 1.8 : 0;
     g.post.trackSun(g.cam.camera, SUN_DIR);
   };
   const draw = () => { frameCamera(); w.__render(); };
@@ -276,7 +276,7 @@ export function installInspection(g: Game) {
     }
   });
   w.__inspection = { seek, reset, play, pause, capture, captureStride, advance, get time() { return elapsed; }, get mode() { return mode; } };
-  if (['front', 'three-quarter', 'side', 'back', 'portrait'].includes(params.get('view') ?? '')) view = params.get('view') as View;
+  if (['front', 'three-quarter', 'side', 'back', 'portrait', 'artwork'].includes(params.get('view') ?? '')) view = params.get('view') as View;
   if (['day', 'late', 'rain'].includes(params.get('light') ?? '')) weather = params.get('light') as WeatherName;
   select('motion').value = mode; select('view').value = view; select('light').value = weather; select('reference').value = refId;
   field<HTMLInputElement>('[name=clear]').checked = params.get('clear') === '1';

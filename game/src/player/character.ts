@@ -10,6 +10,8 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { PALETTE } from '../core/palette';
 import { uPortDark, uPortGlow, type Placeholder } from './placeholder';
 import { filmLight } from '../core/filmLight';
+import { bumpNormal } from '../world/terrain';
+import { addHairDetail } from './hairDetail';
 
 /**
  * Load the rigged character (see docs/character-pipeline.md) and wrap it the same way as
@@ -52,6 +54,7 @@ export async function loadCharacter(url: string, onProgress?: (k: number) => voi
   u.tipBind.value.copy(tip.getWorldPosition(new THREE.Vector3())).applyMatrix4(new THREE.Matrix4().copy(model.matrixWorld).invert());
 
   const lidMorphs: { mesh: THREE.Mesh; index: number }[] = [];
+  const hairMeshes: { mesh: THREE.Mesh; toModel: THREE.Matrix4 }[] = [];
   model.traverse((o) => {
     const mesh = o as THREE.SkinnedMesh;
     if (!mesh.isMesh) return;
@@ -61,13 +64,18 @@ export async function loadCharacter(url: string, onProgress?: (k: number) => voi
     let eyes = typeof mesh.userData.eyes === 'string' ? (JSON.parse(mesh.userData.eyes) as EyeData) : null;
     const toModel = geoToModel(model, mesh);
     const src = mesh.material as THREE.MeshStandardMaterial;
+    const armor = !human && mesh.userData.layeredArmor === true;
+    if (!eyes && !human && !armor && src.map) raiseCeramicEdges(mesh, src.map, toModel);
     const hairW = !!eyes && !human && !!src.map && bakeHairWeights(mesh, src.map, toModel, eyes);
+    if (hairW) hairMeshes.push({ mesh, toModel });
     if (eyes && src.map) measureLidSkin(mesh, src.map, toModel, eyes);
     if (eyes) eyes = toGeometrySpace(eyes, model, mesh);
-    mesh.material = toNodeMaterial(src, eyes, toModel, u, human, hairW);
+    mesh.material = toNodeMaterial(src, eyes, toModel, u, human, hairW, armor);
     const idx = mesh.morphTargetDictionary?.eyesClosed;
     if (idx !== undefined) lidMorphs.push({ mesh, index: idx });
   });
+  // Attach after traversing the source meshes so these fine strands keep their own material.
+  for (const { mesh, toModel } of hairMeshes) addHairDetail(model, mesh, toModel, u, hairSway);
 
   // The shape key relaxes the sculpted iris dome into a smooth lid as the painted lid closes.
   const setBlink = (v: number) => {
@@ -199,6 +207,42 @@ function texturePixels(img: ImageBitmap | HTMLImageElement, w: number, h: number
   return ctx.getImageData(0, 0, w, h).data;
 }
 
+/** A millimetre of real shell thickness supplements the normal-map bevel at silhouettes.
+ * Weld the displacement across UV seams, retain all skin weights, and leave soles in place.
+ */
+function raiseCeramicEdges(mesh: THREE.Mesh, map: THREE.Texture, toModel: THREE.Matrix4) {
+  const img = map.image as ImageBitmap | HTMLImageElement | undefined;
+  const geo = mesh.geometry, pos = geo.attributes.position, normals = geo.attributes.normal, tex = geo.attributes.uv;
+  if (!img?.width || !tex || !normals) return;
+  const size = 512, pixels = texturePixels(img, size, size), fromModel = toModel.clone().invert();
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(toModel);
+  const p = new THREE.Vector3(), n = new THREE.Vector3(), c = new THREE.Color();
+  const keys: string[] = [], offsets = new Map<string, { d: THREE.Vector3; count: number }>();
+  for (let i = 0; i < pos.count; i++) {
+    p.fromBufferAttribute(pos, i).applyMatrix4(toModel);
+    n.fromBufferAttribute(normals, i).applyNormalMatrix(normalMatrix);
+    const x = Math.max(0, Math.min(size - 1, Math.floor(tex.getX(i) * size)));
+    const y = Math.max(0, Math.min(size - 1, Math.floor(tex.getY(i) * size)));
+    const k = (y * size + x) * 4;
+    c.setRGB(pixels[k] / 255, pixels[k + 1] / 255, pixels[k + 2] / 255, THREE.SRGBColorSpace);
+    const lum = c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722;
+    const port = THREE.MathUtils.smoothstep(c.b - Math.max(c.r, c.g * 0.6), 0.18, 0.4);
+    const height = THREE.MathUtils.smoothstep(lum, 0.10, 0.30) * (1 - port)
+      * THREE.MathUtils.smoothstep(p.y, 0.035, 0.09) * 0.0012;
+    const key = `${Math.round(p.x * 100000)},${Math.round(p.y * 100000)},${Math.round(p.z * 100000)}`;
+    keys.push(key);
+    const entry = offsets.get(key) ?? { d: new THREE.Vector3(), count: 0 };
+    entry.d.addScaledVector(n, height); entry.count++; offsets.set(key, entry);
+  }
+  for (let i = 0; i < pos.count; i++) {
+    const entry = offsets.get(keys[i])!;
+    p.fromBufferAttribute(pos, i).applyMatrix4(toModel).addScaledVector(entry.d, 1 / entry.count).applyMatrix4(fromModel);
+    pos.setXYZ(i, p.x, p.y, p.z);
+  }
+  pos.needsUpdate = true;
+  geo.computeBoundingBox(); geo.computeBoundingSphere();
+}
+
 /**
  * Her skin just under each eye, measured from the texture (warm and saturated; lashes and hair
  * left out). A closed lid is lit skin of that tone: the texture above the eye is painted with
@@ -268,6 +312,7 @@ function bakeHairWeights(mesh: THREE.Mesh, map: THREE.Texture, toModel: THREE.Ma
   const group = new Int32Array(n);
   const keys = new Map<string, number>();
   const eyeC = [eyes.L, eyes.R].filter(Boolean).map((e) => new THREE.Vector3(...e!.c));
+  const eyeY = Math.max(...eyeC.map(c => c.y));
   const near = new Float32Array(n);
   let groups = 0;
   for (let i = 0; i < n; i++) {
@@ -284,7 +329,12 @@ function bakeHairWeights(mesh: THREE.Mesh, map: THREE.Texture, toModel: THREE.Ma
     const r = px[o] / 255, g = px[o + 1] / 255, b = px[o + 2] / 255;
     const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
     const sat = (mx - mn) / (mx + 0.001);
-    hair[i] = 1 - THREE.MathUtils.smoothstep(sat, 0.07, 0.16);
+    const grey = 1 - THREE.MathUtils.smoothstep(sat, 0.07, 0.16);
+    // The scan bakes warm light into the dark fringe. Above the forehead, include those
+    // dark strands too; the brighter skin and the eye-distance exclusion protect the face.
+    const fringe = THREE.MathUtils.smoothstep(v.y, eyeY + 0.022, eyeY + 0.067)
+      * (1 - THREE.MathUtils.smoothstep(mx, 0.22, 0.62));
+    hair[i] = Math.max(grey, fringe);
   }
   // Weld, then smooth over the surface's edges.
   let val = new Float32Array(groups), cnt = new Float32Array(groups);
@@ -304,15 +354,17 @@ function bakeHairWeights(mesh: THREE.Mesh, map: THREE.Texture, toModel: THREE.Ma
     }
     val = next;
   }
-  const out = new Float32Array(n);
+  const out = new Float32Array(n), mask = new Float32Array(n);
   for (let i = 0; i < n; i++) {
     const h = THREE.MathUtils.smoothstep(val[group[i]], 0.35, 0.8);
     const fall = 1 - THREE.MathUtils.smoothstep(ys[i], 1.46, 1.64);
     const neck = THREE.MathUtils.smoothstep(ys[i], 1.3, 1.4);
     const face = THREE.MathUtils.smoothstep(near[i], 0.03, 0.07);
-    out[i] = h * fall * neck * face;
+    mask[i] = h * neck * face;
+    out[i] = mask[i] * fall;
   }
   geo.setAttribute('hairW', new THREE.BufferAttribute(out, 1));
+  geo.setAttribute('hairMask', new THREE.BufferAttribute(mask, 1));
   return true;
 }
 
@@ -321,7 +373,7 @@ function bakeHairWeights(mesh: THREE.Mesh, map: THREE.Texture, toModel: THREE.Ma
  * exist as cyan in the base colour, so a cyan key on that texture drives emission.
  */
 function toNodeMaterial(src: THREE.MeshStandardMaterial, eyes: EyeData | null, toModel: THREE.Matrix4,
-  u: CharacterUniforms, human: boolean, hairWeighted = false) {
+  u: CharacterUniforms, human: boolean, hairWeighted = false, armor = false) {
   const { wetLegs: uWetLegs, wetHand: uWetHand, tipBind: uTipBind } = u;
   const m = new THREE.MeshPhysicalNodeMaterial();
   // Character-space position of this fragment (rest pose), for the wet marks.
@@ -352,58 +404,87 @@ function toNodeMaterial(src: THREE.MeshStandardMaterial, eyes: EyeData | null, t
   m.roughness = 1;
   m.metalness = src.metalness;
   const lids = lids0;
+  let surfaceRoughness: any = null;
   if (hairWeighted) m.positionNode = hairSway(rest, u.hair);
-  if (src.map) {
+  if (armor) {
+    // These are real closed plates: COLOR_0 separates ivory faces, chipped bevels and
+    // dark undercuts. Keep the surface quiet so the geometry supplies the larger cracks.
+    const base = attribute('color', 'vec3');
+    const grain = mx_noise_float(rest.mul(270));
+    const age = mx_noise_float(rest.mul(38)).mul(0.10);
+    const cells = mx_worley_noise_vec2(rest.mul(112).add(mx_noise_float(rest.mul(28)).mul(0.65)));
+    const gap = cells.y.sub(cells.x);
+    const wear = smoothstep(0.04, 0.46, mx_noise_float(rest.mul(53)));
+    const aa = gap.fwidth().max(0.002);
+    const crack = smoothstep(float(0.020).add(aa), float(0.006).sub(aa), gap).mul(wear);
+    const groove = smoothstep(0.020, 0.006, gap).mul(wear);
+    const dry = base.mul(float(0.97).add(age)).mul(float(1).sub(crack.mul(0.38)));
+    m.colorNode = vec4(mix(dry, dry.mul(dry).mul(0.85).add(dry.mul(0.35)), wet.mul(0.8)), 1);
+    m.metalnessNode = smoothstep(0.22, 0.08, luminance(base)).mul(0.18);
+    m.clearcoatNode = float(0.12).mul(float(1).sub(wet));
+    m.clearcoatRoughness = 0.45;
+    m.normalNode = bumpNormal(grain.mul(0.00007).sub(groove.mul(0.00016)), normalView);
+    surfaceRoughness = float(0.49).add(age.mul(0.4)).add(grain.mul(0.035)).add(crack.mul(0.10));
+  } else if (src.map) {
     const c = texture(src.map, uv());
     // The shared atlas covers shell, mechanical gaps and the face. Give these distinct
     // responses: ceramic and skin are dielectrics; retain metal only in the dark gaps.
-    const ceramic = smoothstep(0.1, 0.42, luminance(vec3(c.rgb)));
+    const ceramic = smoothstep(0.10, 0.30, luminance(vec3(c.rgb)));
     const metal = src.metalnessMap ? texture(src.metalnessMap, uv()).b.mul(src.metalness) : float(src.metalness);
-    m.metalnessNode = eyes || human ? float(0) : metal.mul(float(1).sub(ceramic)).mul(0.45);
-    m.clearcoatNode = eyes || human ? float(0) : ceramic.mul(0.12).mul(float(1).sub(wet));
-    m.clearcoatRoughness = 0.48;
+    m.metalnessNode = eyes || human ? float(0) : max(metal.mul(0.65), 0.38).mul(float(1).sub(ceramic));
+    m.clearcoatNode = eyes || human ? float(0) : ceramic.mul(0.16).mul(float(1).sub(wet));
+    m.clearcoatRoughness = 0.4;
     let glow: any = smoothstep(0.18, 0.4, c.b.sub(max(c.r, c.g.mul(0.6))));
     // Blue irises aren't emitters.
     if (lids) glow = glow.mul(float(1).sub(lids.region));
     // (Only she has a port and fibres; blue paint on a coat isn't a light.)
-    if (!human) m.emissiveNode = color(PALETTE.cyan).mul(glow).mul(uPortGlow.mul(2.2));
+    if (!human) m.emissiveNode = color(PALETTE.cyan).mul(glow).mul(uPortGlow.mul(1.35));
     // Dark: the painted cyan goes to a dead grey-blue (her core is off).
     const cyanOff = (rgb: any): any => (human ? rgb : mix(rgb, vec3(luminance(rgb)).mul(vec3(0.32, 0.36, 0.4)), glow.mul(uPortDark)));
     // Wet: darker, a little more saturated, and glossy.
     const wetten = (rgb: any): any => mix(rgb, rgb.mul(rgb).mul(0.85).add(rgb.mul(0.35)), wet.mul(0.8));
     if (lids) {
       m.colorNode = Fn(() => {
-        // Her hair is silver-white in the films; the head's texture paints it a dull grey. Lift the
-        // unsaturated greys (hair) toward silver; skin (warm), irises (blue) and lashes (dark) stay.
+        // Keep the scan's strand contrast. A large constant lift turned the grey hair into
+        // white plastic and left a brown fringe wherever the old colour key missed it.
         let base: any = vec3(c.rgb);
         if (!human) {
-          const mx = max(max(c.r, c.g), c.b), mn = min(min(c.r, c.g), c.b);
-          const sat = mx.sub(mn).div(mx.add(0.001));
-          const hairMask = smoothstep(0.16, 0.07, sat).mul(smoothstep(0.1, 0.3, mx)).mul(float(1).sub(lids.region));
-          const silver = vec3(luminance(base)).mul(0.55).add(vec3(0.62, 0.63, 0.66));
-          base = mix(base, silver, hairMask.mul(0.85));
+          const hairMask = hairWeighted ? attribute('hairMask', 'float') : float(0);
+          const silver = vec3(luminance(base).mul(1.12).add(0.026).clamp(0.028, 0.42)).mul(vec3(0.94, 0.99, 1.02));
+          base = mix(base, silver, hairMask.mul(0.92));
         }
         const skin = mix(cyanOff(base), lids.colour.mul(float(1).sub(lids.shade)), lids.cover);
         return vec4(wetten(mix(skin, lids.lash, min(lids.edgeLine.mul(0.9), 1.0))), float(1));
       })();
     } else if (!human) {
-      // Her shell, as in the films: glazed ivory ceramic with a fine network of dark cracks. The
-      // atlas paints much of it as dull grey-brown plates; those become ceramic, and the cracks
-      // are laid out on her body at rest (so they move with her and don't break at the atlas's
-      // island edges). The darkest mechanical parts, the joints and gaps, stay dark; the cyan
-      // port and fibres stay as painted.
+      // The atlas defines the plates. Use that same boundary for colour, relief and roughness
+      // so a chipped edge catches light instead of reading as a flat patch of paint.
+      const lum = luminance(vec3(c.rgb));
+      const shell = ceramic.mul(float(1).sub(glow));
+      const vary = mx_noise_float(rest.mul(11)).mul(0.5).add(0.5);
+      const pores = mx_noise_float(rest.mul(260));
+      const bevel = smoothstep(0.075, 0.34, lum).mul(float(1).sub(glow));
+      const cells = mx_worley_noise_vec2(rest.mul(39).add(mx_noise_float(rest.mul(13)).mul(0.6)));
+      const gap = cells.y.sub(cells.x);
+      // Filter subpixel cracks; a sharp step here sparkles as the camera or limb moves.
+      const aa = gap.fwidth().max(0.002);
+      const crack = smoothstep(float(0.023).add(aa), float(0.009).sub(aa), gap).mul(smoothstep(0.1, 0.6, vary));
+      // Height is differentiated by bumpNormal; keep derivative-based filtering out of it
+      // (nested screen derivatives are undefined on the WebGL fallback).
+      const groove = smoothstep(0.023, 0.009, gap).mul(smoothstep(0.1, 0.6, vary));
+      const plateLip = smoothstep(0.008, 0.08, gap).mul(shell);
+      const relief = bevel.mul(0.0017).add(plateLip.mul(0.00065)).sub(groove.mul(shell).mul(0.00028)).add(pores.mul(shell).mul(0.000045));
+      const mapped = src.normalMap ? normalMap(texture(src.normalMap, uv()), src.normalScale as any) : normalView;
+      m.normalMap = null;
+      m.normalNode = bumpNormal(relief, mapped);
+      surfaceRoughness = mix(float(0.6), float(0.43).add(vary.mul(0.10)), shell).add(crack.mul(shell).mul(0.12));
       m.colorNode = Fn(() => {
         const rgb = vec3(c.rgb);
-        const lum = luminance(rgb);
-        const vary = mx_noise_float(rest.mul(9.0)).mul(0.5).add(0.5);
-        const ivory = mix(color(0xd9d2c3), color(0xf0ebe0), vary);
-        const shell = smoothstep(0.09, 0.27, lum).mul(float(1).sub(glow));
-        const plates = mx_worley_noise_vec2(rest.mul(26.0));
-        const crack = smoothstep(0.03, 0.0, plates.y.sub(plates.x));
-        const fine = mx_worley_noise_vec2(rest.mul(70.0).add(vec3(vary.mul(0.3))));
-        const hair = smoothstep(0.02, 0.0, fine.y.sub(fine.x)).mul(mx_noise_float(rest.mul(5.0)).mul(0.5).add(0.5));
-        const ceramic = mix(ivory, color(0x2a2622), max(crack.mul(0.85), hair.mul(0.45)));
-        return vec4(wetten(cyanOff(mix(rgb, ceramic, shell.mul(0.92)))), float(1));
+        const ivory = mix(color(0xd8d3c8), color(0xece7dd), vary.mul(0.65).add(lum.mul(0.35)));
+        const plate = ivory.mul(mix(float(0.82), float(1.06), smoothstep(0.12, 0.65, lum)))
+          .mul(float(1).sub(crack.mul(0.42)));
+        const steel = mix(rgb, vec3(lum).mul(vec3(0.72, 0.81, 0.86)), float(1).sub(glow).mul(0.6));
+        return vec4(wetten(cyanOff(mix(steel, plate, shell.mul(0.94)))), float(1));
       })();
     } else {
       m.colorNode = vec4(wetten(cyanOff(vec3(c.rgb))), float(1));
@@ -412,10 +493,11 @@ function toNodeMaterial(src: THREE.MeshStandardMaterial, eyes: EyeData | null, t
   // Tripo's roughness reads glossy on the ceramic and hair; keep a floor so it stays glazed, not
   // wet, except where she actually is wet.
   const rough = src.roughnessMap ? texture(src.roughnessMap, uv()).g : float(0.65);
-  m.roughnessNode = mix(rough.clamp(eyes || human ? (human ? 0.55 : 0.48) : 0.4, human ? 0.95 : 0.88), float(0.18), wet.mul(0.9));
+  const dryRoughness = surfaceRoughness ?? rough.clamp(human ? 0.55 : 0.52, human ? 0.95 : 0.82);
+  m.roughnessNode = mix(dryRoughness, float(0.18), wet.mul(0.9));
   // Film lighting on the characters (core/filmLight.ts).
   if (m.colorNode) {
-    const film = filmLight(vec3((m.colorNode as any).rgb));
+    const film = filmLight(vec3((m.colorNode as any).rgb), human ? 1 : 0.68);
     m.emissiveNode = m.emissiveNode ? (m.emissiveNode as any).add(film) : film;
   }
   return m;
