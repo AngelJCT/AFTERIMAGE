@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   abs, attribute, cameraPosition, color, distance, dot, exp, float, fract, instancedBufferAttribute, length, max, mix, normalize,
-  normalWorld, pow, positionLocal, positionWorld, sin, smoothstep, time, uniform, uv, vec3, vec4,
+  normalWorld, pow, positionGeometry, positionLocal, positionWorld, sin, smoothstep, time, uniform, uv, vec3, vec4,
 } from 'three/tsl';
 import { mulberry32 } from '../core/noise';
 import { heightAt } from './terrain';
@@ -141,7 +141,8 @@ function makeCrystal(at: THREE.Vector3, rng: () => number, mark: Mark) {
   const d = attribute('delay', 'float');
   const g = smoothstep(d, d.add(0.5), mark.grow);
   mat.positionNode = positionLocal.mul(g);
-  const tip = positionLocal.y.div(2).clamp(0, 1);
+  // The mesh's own position (positionLocal is already instance-transformed in the fragment).
+  const tip = positionGeometry.y.div(2).clamp(0, 1);
   const nrm = normalize(normalWorld), v = normalize(cameraPosition.sub(positionWorld));
   const fres = spow(float(1).sub(abs(dot(nrm, v))), 3);
   const spent = mark.spent;

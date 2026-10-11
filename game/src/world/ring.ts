@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   abs, atan, attribute, color, cos, cameraPosition, Discard, dot, exp, float, Fn, fract, If, instancedArray, length, max, mix,
-  mx_fractal_noise_float, normalize, normalWorld, pow, positionLocal, positionWorld, sin, smoothstep, step, time, uniform, uv,
+  mx_fractal_noise_float, normalize, normalWorld, pow, positionGeometry, positionLocal, positionWorld, sin, smoothstep, step, time, uniform, uv,
   varying, vec3, vec4,
 } from 'three/tsl';
 import { OTHER_ARCH } from './terrain';
@@ -164,7 +164,8 @@ export function createRing(atmos: { uHorizon: any }, dust = 1400) {
     const n = normalize(normalWorld), v = normalize(cameraPosition.sub(positionWorld));
     const fres = pow(max(float(1).sub(abs(dot(n, v))), 1e-4), float(2));
     const lit = max(dot(n, uniform(SUN_DIR)), 1e-4);
-    const tip = positionLocal.y.div(2).clamp(1e-4, 1);
+    // The mesh's own position (positionLocal is already instance-transformed in the fragment).
+    const tip = positionGeometry.y.div(2).clamp(1e-4, 1);
     // Faceted glass: each face lit or in shade from above-and-sunward, cyan at its edges, pale
     // and bright toward the tips.
     const facet = dot(n, normalize(uniform(SUN_DIR).add(vec3(0, 1.2, 0)))).mul(0.5).add(0.5);

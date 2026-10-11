@@ -11,8 +11,8 @@ import { kneelAt } from './partI';
  *
  * At the still pool she kneels and looks in, as she did at the mirror pool the day she woke.
  * Closing her eyes (hold E) she passes through: when they open it is night and the water is
- * still, dark glass, and in it, only in it, a causeway of pale stones lit by small ochre
- * lights runs across the pool to an arch. Looking at her, she stands on bare water; looking
+ * still, dark glass, and in it, only in it, a way of pale glass plates lit at their edges,
+ * with small ochre lights floating beside it, runs across the pool to an arch. Looking at her, she stands on bare water; looking
  * at the water, she walks the causeway. Off it, the water takes her: she sinks, and the moment
  * rewinds to the last stone she stood on. At the arch, she comes back to the dusk.
  */
@@ -85,6 +85,7 @@ export async function runMirror(g: Game) {
   water.uGlass.value = 1;
   water.showInReflection(cam.camera, REFLECTION_ONLY, true);
   M.group.visible = true;
+  M.uWay.value = 1;
   audio.duck(0.35, 2);
   // The main theme, from its quiet start, carries her across (the grove's cue if it isn't there).
   void audio.playMusic('title', 5).then((ok) => {
@@ -153,7 +154,7 @@ export async function runMirror(g: Game) {
     post.uDrain.value = 0; g.afterimage = 0;
     sinking = false;
     player.controllable = true;
-    ui.hintOnce('hint:mirrorStones', 'keep to the stones in the reflection', '', 'keep to the stones in the reflection', 6);
+    ui.hintOnce('hint:mirrorStones', 'keep to the light in the reflection', '', 'keep to the light in the reflection', 6);
   }
   walking();
 
@@ -165,6 +166,8 @@ export async function runMirror(g: Game) {
   const side = V(-back.z, 0, back.x);
   const low = { position: arch.clone().addScaledVector(back, -4.2).addScaledVector(side, 1.2).add(V(0, 0.45, 0)), target: arch.clone().add(V(0, -1.2, 0)), lens: 28, range: 6, bokeh: 1, handheld: 0.5 };
   cam.cutTo(low, 1.6);
+  // The way of light dims: she stands in the arch's reflection with nothing before it.
+  void clock.tween(2.5, (k) => { M.uWay.value = 1 - 0.9 * smooth(k); });
   player.lookTarget = arch.clone().addScaledVector(back, -1.5).add(V(0, -0.2, 0));
   // With the theme: wherever it has got to, it moves to the breath before its climax, so the
   // climax comes as she stands in the arch; the camera rises through it toward the ring, and on

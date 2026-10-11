@@ -9,8 +9,8 @@ import { heightAt } from '../world/terrain';
  *
  * - Move: WASD or the stick; R / F rise and sink; Shift is faster. Look: drag. Wheel: lens.
  * - Panel: lens, focus (on her, or a set distance), aperture, exposure, roll, grain,
- *   vignette, a look (film, warm, cold, silver), and toggles for her, the bars and the panel
- *   itself (H). "save" writes a full-size JPEG.
+ *   vignette, a look (film, warm, cold, silver), and toggles for her and the bars. "save"
+ *   writes a full-size JPEG (the panel is never in it, so there is no option to hide it).
  * - C or Esc leaves, and everything is as it was.
  */
 const LOOKS: Record<string, { sat: number; tint: [number, number, number]; warm: number }> = {
@@ -35,7 +35,6 @@ export class PhotoMode {
   private aperture = 7;
   private exposure = 0;
   private look = 'film';
-  private hidden = false;
   private saved: Record<string, unknown> | null = null;
   private keys = new Set<string>();
 
@@ -46,7 +45,6 @@ export class PhotoMode {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') { if (e.code === 'Escape') (e.target as HTMLElement).blur(); return; }
       if (e.code === 'KeyC' && !e.repeat && document.getElementById('menu')!.hidden) this.toggle();
       else if (this.active && (e.code === 'Escape')) { e.stopImmediatePropagation(); this.exit(); }
-      else if (this.active && e.code === 'KeyH') this.setHidden(!this.hidden);
       if (this.active) this.keys.add(e.code);
     }, true);
     addEventListener('keyup', (e) => this.keys.delete(e.code));
@@ -77,7 +75,6 @@ export class PhotoMode {
         case 'her': this.g.player.root.visible = !this.g.player.root.visible; this.sync(); break;
         case 'bars': document.body.classList.toggle('photo-bars'); this.sync(); break;
         case 'focus-her': this.focusOnHer = true; this.sync(); break;
-        case 'hide': this.setHidden(true); break;
         case 'save': void this.save(); break;
         case 'exit': this.exit(); break;
       }
@@ -106,7 +103,6 @@ export class PhotoMode {
     this.look = 'film';
     document.body.classList.add('photo');
     this.el.hidden = false;
-    this.setHidden(false);
     (this.el.querySelector('[name=grain]') as HTMLInputElement).value = String(post.uGrain.value);
     (this.el.querySelector('[name=vignette]') as HTMLInputElement).value = String(post.uVignette.value);
     this.sync();
@@ -125,16 +121,11 @@ export class PhotoMode {
     g.player.root.visible = true;
     g.cam.camera.fov = s.fov as number;
     g.cam.camera.updateProjectionMatrix();
-    document.body.classList.remove('photo', 'photo-bars', 'photo-clean');
+    document.body.classList.remove('photo', 'photo-bars');
     this.el.hidden = true;
     this.active = false;
     g.photo = false;
     this.keys.clear();
-  }
-
-  private setHidden(v: boolean) {
-    this.hidden = v;
-    document.body.classList.toggle('photo-clean', v);
   }
 
   /** Panel values and the look, from the state. */

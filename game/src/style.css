@@ -378,7 +378,7 @@ body.photo.photo-bars #bars { display: block; --bars: max(0px, calc((100vh - 100
   font-size: 11px; letter-spacing: 0.14em;
   transition: opacity 0.3s ease;
 }
-#photo[hidden], body.photo-clean #photo { display: none; }
+#photo[hidden] { display: none; }
 #photo .head { font-size: 12px; letter-spacing: 0.35em; margin-bottom: 6px; }
 #photo .hint { display: block; margin-top: 4px; font-size: 9px; letter-spacing: 0.1em; opacity: 0.45; }
 #photo label { display: grid; grid-template-columns: 72px 1fr 56px; align-items: center; gap: 8px; opacity: 0.85; }

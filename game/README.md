@@ -178,10 +178,10 @@ After the search, a reboot, and she comes to at dusk on the ground beyond the ar
 
 - **Looking in:** she kneels at the still pool and looks in. Holding E closes her eyes, and she passes through.
 - **The other side:** her eyes open on night. All the water is dark glass (`water.uGlass`).
-  - In the glass, and only there, a causeway of pale stones with small ochre lights runs to an arch.
+  - In the glass, and only there, a way of light runs to an arch: thin plates of pale glass hovering just above the surface, staggered like stepping stones, glowing at their wavering edges and nearly clear across, with a slow pulse running along them toward the arch; motes drifting up off them; small ochre lights floating either side. Mostly transparent, so the night sky in the water stays the picture. (A reflection is clipped at the surface and sees the world from below, so anything flush with the water shows only as a sliver: the plates float a few centimetres clear.) As she reaches the arch the way dims, leaving her reflection in the arch clean.
   - It lives on the `REFLECTION_ONLY` layer, which the view camera never renders but the water's reflection camera does (`water.showInReflection`).
   - Looking at her, she stands on bare water; in the reflection, she walks the causeway.
-- **Off the causeway:** the water gives. She sinks, and the moment rewinds to the last stone.
+- **Off the causeway:** the water gives. She sinks, and the moment rewinds to the last step she stood on.
 - **The arch:** she stands in its reflection, closes her eyes, and comes back to the dusk. The card reads "the other side".
 - **The main theme** ("Ka-e Eren") carries the chapter. It starts quietly as her eyes open on the night water and builds while she crosses.
   - At the arch it moves (crossfading) to the breath before its climax, so the climax comes as she stands in the arch's reflection.
@@ -209,7 +209,7 @@ After the search, a reboot, and she comes to at dusk on the ground beyond the ar
 
 - **Credits** (`story/credits.ts`): after VI, under "Someone to Find" (`public/audio/SomeoneToFind.mp3`), a slow pull away from her at the pool at dusk with the credits rising through it; any key lets them go after a few seconds. Edit `CREDITS` to add names.
 - **Photo mode** (C, or "photo mode" in the pause menu): the moment holds and a free camera drifts within 7 m of her.
-  - Controls: WASD, R / F, drag to look, the wheel for the lens, H hides the panel.
+  - Controls: WASD, R / F, drag to look, the wheel for the lens. (No option to hide the panel: saved photos never include it.)
   - Panel settings: lens, focus (on her or set), aperture, exposure, roll, grain, vignette, and a look (film, warm, cold, silver).
   - Toggles: her, the bars.
   - **save** writes a full-size JPEG.
